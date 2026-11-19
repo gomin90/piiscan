@@ -39,6 +39,9 @@ DEFAULT_RULES = [
         "require_alpha": True,
         "max_len": 20,
         "charset": "alnum_-",
+        "exclude_suffixes": [".pdf", ".csv", ".xlsx", ".xls", ".docx", ".txt", ".png", ".jpg",
+                            ".jpeg", ".gif", ".mp4", ".zip", ".json", ".log", ".html", ".exe",
+                            ".com", ".net", ".org", ".kr", ".co", ".jp", ".edu", ".gov", ".io"],
         "type": "CUSTOM_WILDCARD_ID",
         "display_name": "구분자 포함 ID",
         "sensitivity": 0.5,
@@ -96,6 +99,9 @@ class CustomIdentifierDetector(Detector):
             if len(v) > max_len:
                 continue
             if rule.get("require_alpha") and not any(ch.isalpha() for ch in v):
+                continue
+            excluded = tuple(s.lower() for s in rule.get("exclude_suffixes", ()))
+            if excluded and v.lower().endswith(excluded):
                 continue
             if rule["regex"].fullmatch(v):
                 return Match(rule.get("type", self.type_key), rule.get("display_name", self.display_name),

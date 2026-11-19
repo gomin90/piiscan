@@ -7,7 +7,7 @@ from app.detectors.base import Detector, Match, ValueProfile
 from app.utils.validators import digits_only, luhn_valid
 
 CARD_RE = re.compile(r"^\d{13,19}$|^\d{4}[- ]\d{4}[- ]\d{4}[- ]\d{4}$|^\d{4}[- ]\d{6}[- ]\d{4}$")
-MASKED_RE = re.compile(r"^\d{4}[- ]?\d{2,6}[*＊Xx]{4,10}[- ]?(\d{1,4})?$")
+MASKED_RE = re.compile(r"^[3-6]\d{3}[- ]?\d{1,6}[- ]?[*＊Xx]{3,10}[- ]?\d{0,4}$")
 
 
 class CreditCardDetector(Detector):

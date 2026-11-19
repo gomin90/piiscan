@@ -19,9 +19,8 @@ class ImsiDetector(Detector):
             return None
         if not imsi_valid(v):
             return None
-        # 15자리 + Luhn 통과이면 IMEI로 더 Strong -> IMSI는 MCC 기반으로 판정
-        if luhn_valid(v) and 200 <= int(v[:3]) <= 799 and v[3:].startswith("0"):
-            return Match(self.type_key, self.display_name, 0.6,
-                        evidence="15자리 (IMSI/IMEI ambiguous)", priority=self.priority, sensitivity=self.sensitivity)
+        if luhn_valid(v):
+            # 15자 + Luhn 통과값은 IMEI detector가 확정한다 (Luhn이 IMEI의 정의 조건).
+            return None
         return Match(self.type_key, self.display_name, 0.85,
                      evidence=f"MCC {v[:3]} + 15자리 IMSI", priority=self.priority, sensitivity=self.sensitivity)

@@ -25,15 +25,19 @@ class LocationDetector(Detector):
     priority = 1
     sensitivity = 0.6
     candidate_tags = frozenset({"decimal", "digits"})
-    name_hints = ("LAT", "LNG", "LON", "위도", "경도", "COORD", "GEO")
+    name_hints = ("LAT", "LNG", "LON", "GEO", "COORD", "POSITION", "GPS", "위도", "경도")
 
     def match(self, value: str, profile: ValueProfile, column_name: str = "") -> Match | None:
         v = value.strip()
-        hinted = any(hint in column_name.upper() for hint in ("LAT", "LNG", "LON", "GEO", "위도", "경도"))
+        hinted = any(hint in column_name.upper()
+                      for hint in ("LAT", "LNG", "LON", "GEO", "COORD", "POSITION", "GPS", "위도", "경도"))
         if MASK_DECIMAL_RE.fullmatch(v):
             return Match(self.type_key, self.display_name, 0.6, masked=True,
                          evidence="마스킹된 좌표", priority=self.priority, sensitivity=self.sensitivity)
+        # 힌트 없는 일반 소수는 좌표로 판정하지 않는다 (예: 3.1416 -> pi).
         if not DECIMAL_RE.fullmatch(v) and not hinted:
+            return None
+        if not hinted and _precision(v) < 5:
             return None
         try:
             number = float(v)

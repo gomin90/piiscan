@@ -30,9 +30,14 @@ class DriverLicenseDetector(Detector):
             if len(digits) == 10 and 1900 <= int(digits[:4]) <= 2100:
                 return Match(self.type_key, self.display_name, 0.88,
                             evidence="8-2 자리 국내 면허번호 형식", priority=self.priority, sensitivity=self.sensitivity)
-            return Match(self.type_key, self.display_name, 0.6,
-                        evidence="10자리 숫자 (면허번호 가능성)", priority=self.priority, sensitivity=self.sensitivity)
-        if OLD_RE.match(v):
+            # 10자 숫자만으로는 면허번호라 확정할 수 없다: 컬럼 이름 근거 필요.
+            if self.column_affinity(column_name) >= 0.35:
+                return Match(self.type_key, self.display_name, 0.6,
+                            evidence="면허 컬럼 이름 + 10자리 숫자",
+                            priority=self.priority, sensitivity=self.sensitivity)
+            return None
+        if OLD_RE.match(v) and self.column_affinity(column_name) >= 0.35:
             return Match(self.type_key, self.display_name, 0.55,
-                        evidence="구형 면허번호 형식", priority=self.priority, sensitivity=self.sensitivity)
+                        evidence="구형 면허번호 형식 (컬럼 이름 근거)",
+                        priority=self.priority, sensitivity=self.sensitivity)
         return None

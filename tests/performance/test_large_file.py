@@ -17,15 +17,16 @@ def test_130k_rows_streaming():
     elapsed = time.perf_counter() - started
     assert result.rows_parsed == 130000
     assert result.settings["mode"] == "전수"
-    # Streaming must keep RSS bounded; a full-file DataFrame load would exceed this.
-    rss = None
+
+    # Streaming must keep this process's RSS bounded: 130k rows x 11 columns of
+    # short strings loaded as a DataFrame would be far larger than the cap below.
     try:
         import psutil
 
-        rss = psutil.virtual_memory().total  # coarse guard, real bound is per-process RSS
+        rss_mb = psutil.Process().memory_info().rss / (1024 ** 2)
+        assert rss_mb < 120.0, f"streaming engine exceeded memory budget: {rss_mb:.1f}MB"
     except ImportError:
         pass
-    # 130k rows x 11 columns of short strings is several tens of MB if fully loaded;
-    # the engine keeps only per-column counters plus a bounded distinct set.
+
     assert elapsed < 120
     assert os.path.getsize(path) > 5_000_000

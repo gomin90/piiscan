@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from app.detectors.base import Detector, Match, ValueProfile
+from app.detectors.base import MASK_CHARS, Detector, Match, ValueProfile
 
 # 시·도 또는 시 level alone is NOT a detailed address.
 REGION_ONLY = {
@@ -20,9 +20,10 @@ DETAIL_RE = re.compile(
     r"|\d{1,4}\s*(층|호|동|室|層)"          # floor / room / building
     r"|아파트|公寓|빌딩|빌라|building|大厦|号楼"
     r"|(apt|unit|suite|flat|#)\s*[-\d]+"
-    r"|\d{1,4}\s+(st|street|ave|avenue|road|rd)\b",
+    r"|(road|로|길|거리|street|st|ave|avenue|blvd|rd)\s+\d{1,5}",
     re.IGNORECASE,
 )
+BUILDING_RE = re.compile(r"아파트|公寓|빌딩|빌라|building|大厦|号楼|apt|unit|suite|flat", re.IGNORECASE)
 
 
 class AddressDetector(Detector):
@@ -40,7 +41,14 @@ class AddressDetector(Detector):
         # Mostly numeric values (phone/ID) are not addresses.
         if profile.digit_ratio > 0.6:
             return None
+        if any(ch in MASK_CHARS for ch in v):   # masked identifiers, not addresses
+            return None
+        if "uuid" in profile.tags or "mac" in profile.tags or ("hex" in profile.tags and profile.length >= 16):
+            return None
         if not DETAIL_RE.search(v):
+            return None
+        # A number is only an address detail when it sits next to a road or building.
+        if not (ROAD_RE.search(v) or BUILDING_RE.search(v)):
             return None
         confidence = 0.9 if (ROAD_RE.search(v) and profile.hangul) else 0.72
         return Match(self.type_key, self.display_name, confidence,

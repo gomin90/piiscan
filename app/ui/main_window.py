@@ -67,7 +67,8 @@ class MainWindow(QWidget):
             hardware_layout.addWidget(QLabel(f"{key}: {value}"))
         tabs.addTab(hardware_widget, "하드웨어 정보")
 
-        tabs.addTab(SettingsWindow(self.config), "환경 설정")
+        self.settings_window = SettingsWindow(self.config)
+        tabs.addTab(self.settings_window, "환경 설정")
 
         debug_widget = QWidget()
         self.debug_label = QLabel("디버그 정보 없음 (환경 설정에서 디버그 로그를 활성화하세요).")
@@ -90,8 +91,11 @@ class MainWindow(QWidget):
     def run_analysis(self) -> None:
         if not self.selector.files:
             return
+        # Apply the 환경 설정 tab before running so batch size / threads / debug
+        # selections actually reach the analysis engine.
+        self.settings_window.apply()
         config = self.config
-        config.debug = self.config.debug
+        diagnostics = Diagnostics(enabled=config.debug)
         engine = LocalLLMEngine(config, self.hardware)
         results = []
         for index, path in enumerate(self.selector.files):
@@ -101,9 +105,10 @@ class MainWindow(QWidget):
                     "전체 파일 수": len(self.selector.files),
                 }
             )
-            result = analyse_file(path, config, engine, progress=lambda done, total: self.progress.update_state(
-                **{"처리 행 수": done, "전체 행 수": total}
-            ))
+            result = analyse_file(path, config, engine, diagnostics=diagnostics,
+                                  progress=lambda done, total: self.progress.update_state(
+                                      **{"처리 행 수": done, "전체 행 수": total}
+                                  ))
             results.append(result)
             self.history.append(result)
             self.history_table.setRowCount(len(self.history))
@@ -132,8 +137,15 @@ class MainWindow(QWidget):
                   output_dir / f"privacy_results_{stamp}.csv")
         write_txt(results, output_dir / f"privacy_report_{stamp}.txt")
         self.result_window.show_results([r for result in results for r in result.results])
+        self.diagnostics = diagnostics.events
         if config.debug:
-            self.debug_label.setText("\n".join(f"{e}" for e in self.diagnostics[:50]))
+            self.debug_label.setText("\n".join(
+                f"[{e['ts']}s] {e['event']}: "
+                + ", ".join(f"{k}={v}" for k, v in e.items() if k not in {"event", "ts"})
+                for e in self.diagnostics[:50]
+            ))
+        else:
+            self.debug_label.setText("디버그 정보 없음 (환경 설정에서 디버그 로그를 활성화하세요).")
 
 
 def run_gui(args=None) -> int:

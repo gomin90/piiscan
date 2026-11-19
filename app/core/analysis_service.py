@@ -119,7 +119,8 @@ def analyse_file(
 
     # 3단계: 보호/코드 그룹 분석
     protection_groups = analyze_protection(stats, findings)
-    code_groups = analyze_code_groups(loader.column_names, code_sample, stats)
+    code_groups = analyze_code_groups(loader.column_names, code_sample, stats,
+                                      privacy_columns={f["column"] for f in findings})
 
     # 4단계: CSV parsing resources 정리 (stats만 유지) -> 5/6단계 AI
     llm = llm or LocalLLMEngine(config, detect_hardware())
@@ -130,7 +131,8 @@ def analyse_file(
             judgement = llm.judge_column({**finding, "table": settings.table})
             if judgement:
                 ai_judgements[finding["column"]] = judgement
-            if llm.memory_usage().get("rss_mb", 0) and llm.memory_usage()["rss_mb"] > 3500:
+            rss_mb = llm.memory_usage().get("rss_mb") or 0
+            if rss_mb > 3500:
                 logger.warning("RAM 한계 감지 -> AI 추론 중단, 규칙 기반 결과 보존")
                 llm.close()
                 break

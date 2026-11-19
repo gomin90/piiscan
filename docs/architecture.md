@@ -7,7 +7,7 @@ CSV input
   -> format detection (encoding / delimiter / header)
   -> streaming parse (default batch 1,000 rows)
   -> column metadata + statistics
-  -> rule based detection (25 detectors)
+  -> rule based detection (24 detectors; LOCATION covers 위도/경도)
   -> protection (MASK/HASH/ENC) analysis
   -> code group analysis
   -> Local LLM보조 judgement (llama.cpp, CPU/CUDA/Metal)
@@ -26,7 +26,7 @@ statistics and masked samples. Raw personal data is never sent to the model.
 | app/core/csv_loader.py | lazy row streaming, per-row error isolation |
 | app/core/column_stats.py | length buckets, HyperLogLog distinct, masked ratio |
 | app/core/privacy_engine.py | detector orchestration with tag gating |
-| app/detectors/*.py | one independent class per privacy type |
+| app/detectors/*.py | one independent detector class per privacy type (24 registered) |
 | app/core/encryption_analyzer.py | base column vs _MASK/_HASH/_ENC relation, value verification |
 | app/core/code_group_analyzer.py | GROUP_CODE / CODE / CODE_NAME meaning |
 | app/core/risk_engine.py | sensitivity, ratio, protection, compound identity |

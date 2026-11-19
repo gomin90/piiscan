@@ -8,12 +8,15 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from app.ai.cpu_fallback import InferencePlan, plan_inference
 from app.ai.gpu_detector import HardwareReport, detect_hardware
-from app.ai.model_loader import ModelInfo, select_model
+from app.ai.model_loader import ModelInfo, discover_models, select_model
 from app.ai.prompt_manager import build_code_group_prompt, build_prompt, column_context
 from app.ai.response_validator import parse_response, validate
 from app.config.settings import AnalysisConfig
@@ -96,12 +99,47 @@ class LocalLLMEngine:
 
     def load(self) -> bool:
         self.model = select_model(self.hardware.available_ram_gb)
-        self.plan = plan_inference(self.hardware, self.model, self.config.context_length)
+        if self.model is None:
+            models = discover_models()
+            if models and not any(m.verified for m in models):
+                self.model = models[0]  # keep the file for diagnostics
+                self.status = (
+                    "모델 SHA256 무결성 검증 실패 (model_manifest.json와 일치하지 않음) "
+                    "-> 규칙 기반 결과만 사용"
+                )
+                self.backend = "none"
+                self.fallback_used = True
+                return False
+        self.plan = plan_inference(self.hardware, self.model, self.config.context_length, self.config.threads)
         if not self.config.use_ai or not self.plan.allow_ai or self.model is None:
             self.status = "AI 비활성화 (오프라인 의미 분석 사용)"
             self.backend = "heuristic"
             self.fallback_used = True
             return False
+
+        # 폐쇄망 배포 요구사항: 모델 로드 전에 임시 directory 사용 가능 여부 확인
+        temp_dir = Path(tempfile.gettempdir())
+        probe = temp_dir / f"piiscan_llm_probe_{os.getpid()}"
+        try:
+            probe.write_text("probe")
+        except OSError as exc:
+            self.status = f"임시 directory 사용 불가 -> AI 추론 건너뛰기: {exc}"
+            self.backend = "none"
+            self.fallback_used = True
+            return False
+        finally:
+            probe.unlink(missing_ok=True)
+
+        required_ram_gb = self.model.size_bytes / (1024 ** 3) + 0.8
+        if self.hardware.available_ram_gb < required_ram_gb:
+            self.status = (
+                f"RAM 부족 (필요 {required_ram_gb:.1f}GB, "
+                f"사용 가능 {self.hardware.available_ram_gb:.1f}GB) -> 규칙 기반 결과만 사용"
+            )
+            self.backend = "none"
+            self.fallback_used = True
+            return False
+
         try:
             from llama_cpp import Llama  # type: ignore
         except ImportError:
@@ -186,8 +224,10 @@ class LocalLLMEngine:
         try:
             import psutil
 
-            return {"rss_mb": round(psutil.virtual_memory().used / (1024 ** 2), 1)}
-        except ImportError:
+            # Process RSS (this process), not system-wide used memory.
+            rss = psutil.Process().memory_info().rss
+            return {"rss_mb": round(rss / (1024 ** 2), 1)}
+        except (ImportError, AttributeError):
             return {"rss_mb": None}
 
     def close(self) -> None:

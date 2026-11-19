@@ -113,9 +113,17 @@ def analyze_protection(stats: list[ColumnStats], findings: list[dict]) -> list[P
             continue
         base, kind = split
         if base not in by_name:
-            # 원천 컬럼이 없는 보호 컬럼: 독립 보호 컬럼으로 기록
+            # 원천 컬럼이 없는 보호 컬럼: 독립 보호 컬럼으로 기록하되,
+            # status 판정에는 실제로 검증된 보호 값이 반영되어야 한다.
             group = groups.setdefault(f"__orphan__{column.name}", ProtectionGroup(column.name))
-            group.related[column.name] = classify_protection(column.name, column)
+            detail = classify_protection(column.name, column)
+            group.related[column.name] = detail
+            if kind == "MASK":
+                group.mask = {"column": column.name, **detail}
+            elif kind == "HASH":
+                group.hash_ = {"column": column.name, **detail}
+            elif kind == "ENC":
+                group.enc = {"column": column.name, **detail}
             continue
         group = groups.setdefault(base, ProtectionGroup(base))
         detail = classify_protection(column.name, column)

@@ -1,4 +1,4 @@
-"""Privacy Scanner 실행入口 (CLI + GUI).
+"""Privacy Scanner 실행 진입점 (CLI + GUI).
 
 CLI:
   python app/main.py --file data.csv --output-dir results

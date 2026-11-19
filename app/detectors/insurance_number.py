@@ -4,9 +4,8 @@ from __future__ import annotations
 import re
 
 from app.detectors.base import Detector, Match, ValueProfile
-from app.utils.validators import digits_only
 
-NHI_RE = re.compile(r"^\d{2}-\d{6}-\d{4}$|^\d{12,13}$")
+NHI_DASH_RE = re.compile(r"^\d{2}-\d{6}-\d{4}$")
 MASKED_RE = re.compile(r"^\d{2}-\d{6}-[*＊]{4}$|^\d{2}-[*＊]{6}-\d{4}$")
 
 
@@ -23,9 +22,14 @@ class InsuranceNumberDetector(Detector):
         if MASKED_RE.match(v):
             return Match(self.type_key, self.display_name, 0.65, masked=True,
                         evidence="마스킹된 보험번호 형식", priority=self.priority, sensitivity=self.sensitivity)
-        if not NHI_RE.match(v):
+        if not NHI_DASH_RE.match(v) and not re.fullmatch(r"\d{12,13}", v):
             return None
-        digits = digits_only(v)
-        hint = 0.15 if any(h in value.upper() for h in ("INSUR", "NHI", "HEALTH")) else 0.0
+        # A bare 12-13 digit run is ambiguous (resident / foreigner / account all fit),
+        # so it is only reported when the column name claims an insurance number.
+        if not NHI_DASH_RE.match(v) and self.column_affinity(column_name) < 0.35:
+            return None
+        hint = 0.15 if NHI_DASH_RE.match(v) else 0.0
         return Match(self.type_key, self.display_name, min(0.55 + hint, 0.85),
-                     evidence="12-13자리 국가보험번호 형식", priority=self.priority, sensitivity=self.sensitivity)
+                     evidence="NN-NNNNNN-NNNN 국가보험번호 형식" if NHI_DASH_RE.match(v)
+                     else "보험번호 컬럼 이름 + 12-13자리 숫자",
+                     priority=self.priority, sensitivity=self.sensitivity)

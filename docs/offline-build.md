@@ -7,6 +7,8 @@ script touches the internet.
 
 ```
 vendor/wheels/          PySide6, PyInstaller, llama-cpp-python, psutil wheels
+                      (must be copied in from a connected machine; the repository
+                       does not ship the wheels - verify with `ls vendor/wheels` before step 1)
 models/                 GGUF model + model_manifest.json (sha256)
 resources/              prompt and rule files
 tools/                  build.py, benchmark.py

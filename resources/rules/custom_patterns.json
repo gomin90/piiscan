@@ -32,7 +32,35 @@
       "charset": "alnum_-",
       "type": "CUSTOM_WILDCARD_ID",
       "display_name": "구분자 포함 ID",
-      "sensitivity": 0.5
+      "sensitivity": 0.5,
+      "exclude_suffixes": [
+        ".co",
+        ".com",
+        ".csv",
+        ".docx",
+        ".edu",
+        ".exe",
+        ".gif",
+        ".gov",
+        ".htm",
+        ".html",
+        ".io",
+        ".jp",
+        ".jpeg",
+        ".jpg",
+        ".json",
+        ".kr",
+        ".log",
+        ".mp4",
+        ".net",
+        ".org",
+        ".pdf",
+        ".png",
+        ".txt",
+        ".xls",
+        ".xlsx",
+        ".zip"
+      ]
     }
   ]
 }

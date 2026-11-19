@@ -68,12 +68,56 @@ def _pick(columns: list[str], hints: tuple[str, ...]) -> str | None:
     return None
 
 
-def analyze(header: list[str], sample_rows: list[list[str]], column_stats) -> list[CodeGroup]:
+PROTECTED_SUFFIXES = ("_MASK", "_HASH", "_ENC", "_ENCRYPTED", "_SHA256", "_MD5")
+
+
+def _pick_desc_column(header: list[str], code_col: str, group_col: str | None,
+                      desc_cols: list[str], stats: dict) -> str | None:
+    """Choose the description column belonging to this code column.
+
+    설명 컬럼은 (1) 코드/그룹 컬럼과 같은 접두사를 가진 컬럼, (2) 코드 컬럼 바로
+    다음 컬럼, (3) 나머지 descHint 컬럼 순으로 선택한다. 보호(MASK/HASH) 컬럼이나
+    파일명/URL 같은 값만 담긴 컬럼을 설명으로하면 코드 그룹 판정이 원문 샘플을
+    근거로 오하게 "개인정보 관련"로 flagged 될 수 있다.
+    """
+    candidates = [c for c in desc_cols if c not in (code_col, group_col)]
+    if not candidates:
+        return None
+
+    def related(name: str) -> bool:
+        for anchor in (code_col, group_col or ""):
+            if not anchor:
+                continue
+            prefix = anchor.split("_")[0]
+            if name.upper().startswith(prefix) or name.upper() == anchor.upper() + "_DESC":
+                return True
+        return False
+
+    for name in candidates:
+        if any(name.upper().endswith(s) for s in PROTECTED_SUFFIXES):
+            continue
+        if related(name):
+            return name
+    for name in candidates:
+        if any(name.upper().endswith(s) for s in PROTECTED_SUFFIXES):
+            continue
+        idx = header.index(name)
+        if idx == header.index(code_col) + 1:
+            return name
+    return candidates[0]
+
+
+def analyze(header: list[str], sample_rows: list[list[str]], column_stats,
+            privacy_columns: set[str] | None = None) -> list[CodeGroup]:
     """Detect code-group structure from header names plus bounded row samples."""
     stats = {column.name: column for column in column_stats}
-    group_cols = [c for c in header if _pick([c], GROUP_HINTS)]
+    privacy_columns = privacy_columns or set()
+    # "GROUP_DESC" 같은 컬럼은 그룹 키가 아니라 설명 컬럼이다.
+    group_cols = [c for c in header if _pick([c], GROUP_HINTS) and not _pick([c], DESC_HINTS)]
     code_cols = [c for c in header if _pick([c], CODE_HINTS) and c not in group_cols]
-    desc_cols = [c for c in header if _pick([c], DESC_HINTS) and c not in group_cols + code_cols]
+    desc_cols = [c for c in header
+                 if _pick([c], DESC_HINTS) and c not in group_cols + code_cols
+                 and c not in privacy_columns]
     if not code_cols:
         return []
 
@@ -91,7 +135,7 @@ def analyze(header: list[str], sample_rows: list[list[str]], column_stats) -> li
             if candidate != code_col and stats[candidate].distinct.estimate() <= distinct:
                 group_col = candidate
                 break
-        desc_col = next((c for c in desc_cols if c not in (code_col, group_col)), None)
+        desc_col = _pick_desc_column(header, code_col, group_col, desc_cols, stats)
 
         group_values: set[str] = set()
         identifiers = 0

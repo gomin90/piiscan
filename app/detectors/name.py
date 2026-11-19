@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 
+from app.detectors.address import REGION_ONLY
 from app.detectors.base import Detector, Match, ValueProfile
 
 KOREAN_SURNAMES = {
@@ -30,9 +31,13 @@ class NameDetector(Detector):
                         evidence="마스킹된 이름", priority=self.priority, sensitivity=self.sensitivity)
         if profile.hangul and profile.length <= 4 and profile.digits == 0 and profile.other == 0:
             first = v[:1]
-            strong = first in KOREAN_SURNAMES and 2 <= profile.length <= 4
-            return Match(self.type_key, self.display_name, 0.9 if strong else 0.6,
-                        evidence="한글 이름 길이/분포", priority=self.priority, sensitivity=self.sensitivity)
+            if first in KOREAN_SURNAMES and 2 <= profile.length <= 4:
+                return Match(self.type_key, self.display_name, 0.9,
+                             evidence="한글 surname + 이름 길이/분포",
+                             priority=self.priority, sensitivity=self.sensitivity)
+            if profile.length >= 2 and v in REGION_ONLY:
+                return None  # region / city token, not a person name
+            return None
         if LATIN_NAME.match(v):
             return Match(self.type_key, self.display_name, 0.8,
                         evidence="이름+성 형식", priority=self.priority, sensitivity=self.sensitivity)

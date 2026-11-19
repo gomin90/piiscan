@@ -76,26 +76,29 @@ def build(target: str, debug: bool) -> int:
     if not run_tests():
         return 1
 
-    from PyInstaller.__main__ import main as pyinstaller_main
+    from PyInstaller.__main__ import run as pyinstaller_run
 
     args = [
         str(ENTRY),
         "--onefile",
-        "--name", "PrivacyScanner" if target == "windows" else "PrivacyScanner",
-        f"--add-data={ROOT / 'models'}{pathsep()}:models",
-        f"--add-data={ROOT / 'resources'}{pathsep()}:resources",
+        "--name=PrivacyScanner",
+        "--noconfirm",
+        f"--add-data={ROOT / 'models'}{pathsep()}models",
+        f"--add-data={ROOT / 'resources'}{pathsep()}resources",
     ]
     if target == "windows":
         args.append("--exclude-module=tkinter")
     if debug:
         args.append("--debug")
         print("[debug build] diagnostics logging enabled")
-    pyinstaller_main(args)
-    print(f"[ok] built for {target}: dist/PrivacyScanner")
+    pyinstaller_run(args)
+    binary = "dist/PrivacyScanner.exe" if target == "windows" else "dist/PrivacyScanner"
+    print(f"[ok] built for {target}: {binary}")
     return 0
 
 
 def pathsep() -> str:
+    """PyInstaller uses ';' on Windows and ':' on POSIX inside --add-data."""
     return ";" if sys.platform == "win32" else ":"
 
 

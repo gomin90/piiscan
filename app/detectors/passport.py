@@ -24,7 +24,7 @@ class PassportDetector(Detector):
         v = value.strip().upper()
         if not v or len(v) > 12:
             return None
-        if MASKED_RE.match(v):
+        if MASKED_RE.match(v) and len(digits_only(v)) >= 3:
             return Match(self.type_key, self.display_name, 0.7, masked=True,
                         evidence="여권번호 마스킹 패턴", priority=self.priority, sensitivity=self.sensitivity)
         if KR_RE.match(v):

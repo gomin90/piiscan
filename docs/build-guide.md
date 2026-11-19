@@ -28,7 +28,7 @@ a runtime menu.
 
 - `app/` source
 - `models/` GGUF files (SHA256 verified before the build)
-- `resources/rules` and `resources/prompts`
+- `resources/rules` (prompts are embedded in `app/ai/prompt_manager.py`; `resources/prompts/` is kept for user-supplied overrides)
 - native llama.cpp library (CPU build on macOS, CUDA build on Windows)
 
 PyInstaller one-file executables extract their payload to a temp directory at
