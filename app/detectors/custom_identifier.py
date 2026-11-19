@@ -1,0 +1,104 @@
+"""사용자 정의 ID 패턴 detector.
+
+규칙은 resources/rules/custom_patterns.json에서 정의한다. 접미사(suffix),
+구분자(separator), 최대 길이(max_len), 문자 조합(charset)을 각각 관리할 수 있어
+폐쇄망 환경에서도 코드 변경 없이 규칙만 교체할 수 있다.
+"""
+from __future__ import annotations
+
+import re
+
+from app.detectors.base import Detector, Match, ValueProfile
+
+DEFAULT_RULES = [
+    {
+        "id": "sec_id",
+        "label": ".sec로 끝나는 20자리 이하 ID",
+        "suffix": ".sec",
+        "max_len": 20,
+        "charset": "alnum_-",
+        "type": "CUSTOM_SEC_ID",
+        "display_name": ".sec ID",
+        "sensitivity": 0.6,
+    },
+    {
+        "id": "id_suffix",
+        "label": ".id로 끝나는 20자리 이하 ID",
+        "suffix": ".id",
+        "max_len": 20,
+        "charset": "alnum_-",
+        "type": "CUSTOM_ID_SUFFIX",
+        "display_name": ".id ID",
+        "sensitivity": 0.55,
+    },
+    {
+        "id": "wildcard_dotted",
+        "label": "%.%.% 형태의 20자리 이하 ID",
+        "pattern": "%\\.%",
+        "wildcard": True,
+        "require_alpha": True,
+        "max_len": 20,
+        "charset": "alnum_-",
+        "type": "CUSTOM_WILDCARD_ID",
+        "display_name": "구분자 포함 ID",
+        "sensitivity": 0.5,
+    },
+]
+
+CHARSETS = {
+    "alnum": r"[A-Za-z0-9]+",
+    "alnum_": r"[A-Za-z0-9_]+",
+    "alnum_-": r"[A-Za-z0-9_-]+",
+    "digits": r"\d+",
+    "any": r".+",
+}
+
+
+def build_regex(rule: dict) -> re.Pattern:
+    """Compile a rule into a regex. '%' is treated as a wildcard token."""
+    charset = CHARSETS.get(rule.get("charset", "alnum_-"), CHARSETS["alnum_-"])
+    pattern = rule.get("pattern")
+    if pattern:
+        if rule.get("wildcard"):
+            pattern = pattern.replace("%", charset)
+        return re.compile(pattern)
+    suffix = re.escape(rule.get("suffix", ""))
+    separator = rule.get("separator")
+    if separator:
+        body = f"{charset}(?:{re.escape(separator)}{charset}){{1,}}"
+    else:
+        body = charset
+    return re.compile(f"^(?:{body}){suffix}$")
+
+
+class CustomIdentifierDetector(Detector):
+    type_key = "CUSTOM_IDENTIFIER"
+    display_name = "사용자 정의 ID"
+    priority = 1
+    sensitivity = 0.5
+    candidate_tags = frozenset({"latin", "digits", "dot_token"})
+    name_hints = ()
+
+    def __init__(self, rules: list[dict] | None = None):
+        self.rules = []
+        for rule in (rules or DEFAULT_RULES):
+            try:
+                self.rules.append({**rule, "regex": build_regex(rule)})
+            except re.error:
+                continue
+
+    def match(self, value: str, profile: ValueProfile, column_name: str = "") -> Match | None:
+        v = value.strip()
+        if not v or len(v) > 40:
+            return None
+        for rule in self.rules:
+            max_len = int(rule.get("max_len", 20))
+            if len(v) > max_len:
+                continue
+            if rule.get("require_alpha") and not any(ch.isalpha() for ch in v):
+                continue
+            if rule["regex"].fullmatch(v):
+                return Match(rule.get("type", self.type_key), rule.get("display_name", self.display_name),
+                             0.8, evidence=f"사용자 정의 규칙 {rule.get('id')}",
+                             priority=self.priority, sensitivity=float(rule.get("sensitivity", 0.5)))
+        return None

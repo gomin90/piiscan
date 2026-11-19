@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "note": "폐쇄망 배포용 GGUF 모델 manifest. 모델 바이너리는 오프라인 배포 패키지에 포함되며, SHA256 검증 후 로드된다.",
+  "models": [
+    {
+      "file": "qwen2-1.5b-instruct-q4_k_m.gguf",
+      "sha256": "REPLACE_WITH_OFFLINE_MODEL_SHA256",
+      "size_bytes": 0,
+      "context": 2048
+    }
+  ]
+}

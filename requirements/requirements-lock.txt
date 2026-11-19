@@ -1,0 +1,7 @@
+# Pinned versions for the closed-network build. Record the sha256 of each
+# wheel placed in vendor/wheels/ so installs can be integrity-checked.
+PySide6==6.7.2          # sha256: (fill from vendor/wheels/PySide6-6.7.2-*.whl)
+pyinstaller==6.11.1     # sha256: (fill)
+llama-cpp-python==0.2.90 # sha256: (fill; must be built with CUDA on the Windows host)
+psutil==5.9.8           # sha256: (fill)
+pytest==8.3.3           # sha256: (fill)
