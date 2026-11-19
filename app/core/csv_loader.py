@@ -96,6 +96,7 @@ class CsvLoader:
                 # One cheap pre-pass gives an accurate progress denominator
                 # without ever holding the file in memory.
                 self.total_rows = count_rows(self.settings.path, self.settings.encoding, self.settings.delimiter)
+                self.total_rows = max(0, self.total_rows - self.rows_to_skip())
             except OSError:
                 self.total_rows = None
 

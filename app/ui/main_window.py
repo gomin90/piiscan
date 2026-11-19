@@ -124,8 +124,12 @@ class MainWindow(QWidget):
                 self.history_table.setItem(row_index, column, QTableWidgetItem(value))
             self.progress.update_state(
                 **{
+                    "처리 행 수": result.rows_parsed,
+                    "전체 행 수": result.total_rows,
                     "탐지된 개인정보 유형": len({r.privacy_type for r in result.results}),
                     "발견된 컬럼 수": len({r.column for r in result.results}),
+                    "현재 분석 컬럼": max(result.results, key=lambda r: r.hits).column if result.results else "-",
+                    "메모리 사용량": f"{engine.memory_usage()['rss_mb']:.1f} MB",
                     "AI 실행 상태": result.ai_summary.get("status", "-"),
                     "추론 방식": result.ai_summary.get("backend", "-"),
                 }

@@ -39,6 +39,12 @@ class ResultWindow(QWidget):
         self.table = QTableWidget()
         self.table.setColumnCount(len(COLUMNS))
         self.table.setHorizontalHeaderLabels(COLUMNS)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        widths = [90, 60, 60, 90, 120, 110, 70, 90, 70, 120, 80, 90, 80, 220]
+        for index, width in enumerate(widths):
+            self.table.setColumnWidth(index, width)
+        self.table.cellClicked.connect(self._on_row_clicked)
+        self.rows: list = []
         layout.addWidget(self.table)
         self.detail = QWidget()
         detail_layout = QGridLayout(self.detail)
@@ -53,6 +59,7 @@ class ResultWindow(QWidget):
 
     def show_results(self, results: list) -> None:
         rows = sorted(results, key=lambda r: (RISK_ORDER.get(r.risk_level, 9), -r.hits))
+        self.rows = rows
         self.table.setRowCount(len(rows))
         for index, row in enumerate(rows):
             values = [
@@ -76,7 +83,26 @@ class ResultWindow(QWidget):
         high = sum(1 for row in rows if row.risk_level in ("매우 높음", "높음"))
         self.summary.setText(f"총 {len(rows)}건 / 위험도 높음 {high}건")
 
-    def show_detail(self, column: str) -> None:
+    def _on_row_clicked(self, row: int, _column: int) -> None:
+        if 0 <= row < len(self.rows):
+            self.show_detail(self.rows[row])
+
+    def show_detail(self, result) -> None:
+        protection = ", ".join(result.protection_columns) or "없음"
+        values = {
+            "파일": result.file,
+            "테이블": result.table,
+            "컬럼": result.column,
+            "유형": result.display_name,
+            "탐지 건수": f"{result.hits} / {result.analysed_rows}행",
+            "탐지 비율": f"{result.ratio:.2%}",
+            "보호 상태": f"{protection} | MASK {result.mask_status} | HASH {result.hash_status}",
+            "규칙 근거": result.rationale or "-",
+            "AI근거": (
+                f"AI 신뢰도 {result.ai_confidence:.2f} (규칙 {result.rule_confidence:.2f})"
+                if result.ai_confidence else "AI 미사용/미확정"
+            ),
+            "위험도": result.risk_level,
+        }
         for field, label in self.detail_labels.items():
-            label.setText("-")
-        self.detail_labels["컬럼"].setText(column)
+            label.setText(values.get(field, "-"))
