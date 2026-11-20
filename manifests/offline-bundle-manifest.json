@@ -1,8 +1,8 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-20T03:53:05.258787+00:00",
+  "generated_at": "2026-11-20T03:55:38.798255+00:00",
   "git": {
-    "commit": "df78d20c5f5d3caf61808d546839d5d8a94adf57",
+    "commit": "5425abd33331ac6e2d71191bfdf4acf2668c9a6e",
     "branch": "main",
     "repository": ""
   },
@@ -32,7 +32,7 @@
     }
   },
   "file_count": 212,
-  "total_bytes": 2397381820,
+  "total_bytes": 2397381913,
   "total_mb": 2286.3,
   "files": [
     {
@@ -451,8 +451,8 @@
     },
     {
       "path": "docs/jev-style-report.md",
-      "size": 20998,
-      "sha256": "0f088bebc2c38fa04b4edf91950f26efc081acddd624f14810d547e40bc85d81",
+      "size": 21091,
+      "sha256": "303b52217fdf274303bd8b88bc38bdb8d41b7324487082ee3e7e0f1da77d0875",
       "category": "docs"
     },
     {

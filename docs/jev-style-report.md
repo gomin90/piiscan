@@ -320,7 +320,7 @@ Evidence:
 ./.venv/bin/python tools/verify_wheelhouse.py        # dependency closure check
 ./.venv/bin/python tools/make_bundle_manifest.py     # manifests/offline-bundle-manifest.json
 ./.venv/bin/python tools/make_bundle_manifest.py --verify
-./.venv/bin/python tools/make_release_bundle.py      # dist/piiscan-offline-bundle.zip
+./.venv/bin/python tools/make_release_bundle.py --split   # dist/piiscan-{app,model-0.8b,model-2b}.zip
 ./.venv/bin/python tools/jev_smoke.py --model 0.8b-v3 --cpu-only
 ```
 
@@ -358,7 +358,7 @@ verified-on-macOS **bundle** plus the scripts the user runs on Windows.
 | `scripts/windows/{diagnose,verify-offline-bundle,install-offline,build-exe,fetch-cuda-backend,build-jev-score}.ps1`, `run.bat` | hand-written; syntax-checked with PowerShell 7.7 (`Parser::ParseFile` -> 0 errors) and `diagnose.ps1` / `verify-offline-bundle.ps1` dry-run against this repo | dry-run reports in `results/windows/` | **no** (Windows-only cmdlets such as `Get-CimInstance` are guarded) |
 | `docs/windows-test-guide.md`, `docs/THIRD-PARTY-NOTICES.md`, `LICENSE` | written from the recorded provenance | - | - |
 | `samples/windows_sample.csv` | synthetic, no real personal data | manifest entry | no |
-| `dist/piiscan-offline-bundle.zip` | `tools/make_release_bundle.py` | 2,255.1 MB, 206 files (not committed; regenerate on demand) | no |
+| `dist/piiscan-{app,model-0.8b,model-2b}.zip` | `tools/make_release_bundle.py --split` | 527.6 / 508.6 / 1,219.1 MB; each under GitHub's 2 GiB asset limit. Reassembled and re-verified on macOS: 212/212 PASS | no |
 
 Honest limits:
 
