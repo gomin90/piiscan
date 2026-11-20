@@ -1,6 +1,7 @@
 """QA: Jev-Style decision-model AI layer (fallback, privacy, integrity)."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -205,3 +206,69 @@ def test_engine_skips_ai_when_ram_is_insufficient():
     assert engine.summary()["skipped_reason"]
     result = analyse_file(Path("tests/fixtures/synthetic/mixed_pii.csv"), llm=engine)
     assert result.results, "rules must still produce findings when the model cannot load"
+
+
+def _fake_gguf(path: Path) -> None:
+    """Minimal GGUF header so integrity checks can run without a 500MB model."""
+    kv = {"general.architecture": "qwen35", "general.name": "Jev-Style-0.8B-Decision-v3"}
+    data = b"GGUF" + (3).to_bytes(4, "little") + (0).to_bytes(8, "little") + (len(kv)).to_bytes(8, "little")
+    for key, value in kv.items():
+        data += len(key).to_bytes(8, "little") + key.encode() + (8).to_bytes(4, "little")
+        data += len(value).to_bytes(8, "little") + value.encode()
+    path.write_bytes(data)
+
+
+def _make_fake_bundle(root: Path, with_dlls: bool = True) -> Path:
+    model_dir = root / "models" / "jev-style"
+    release = model_dir / "0.8b-v3"
+    release.mkdir(parents=True)
+    gguf = release / "Jev-Style-0.8B-Decision-v3-Q4_K_M.gguf"
+    _fake_gguf(gguf)
+    digest = hashlib.sha256(gguf.read_bytes()).hexdigest()
+    (release / "manifest.json").write_text(
+        json.dumps({"files": {gguf.name: {"sha256": digest}}}), encoding="utf-8"
+    )
+    (release / "tokenizer").mkdir()
+    (release / "tokenizer" / "tokenizer.json").write_text("{}", encoding="utf-8")
+    (release / "readout_config.json").write_text("{}", encoding="utf-8")
+    (release / "jev_style_decision_gguf.py").write_text("", encoding="utf-8")
+    runtime = root / "runtime" / "windows"
+    runtime.mkdir(parents=True)
+    (runtime / "jev-score.exe").write_bytes(b"MZ fake scorer")
+    (runtime / "jev-score-v2.exe").write_bytes(b"MZ fake scorer v2")
+    if with_dlls:
+        for dll in ("llama.dll", "ggml.dll", "ggml-base.dll", "libomp.dll", "ggml-cpu-x64.dll"):
+            (runtime / dll).write_bytes(b"MZ fake dll")
+    return model_dir
+
+
+def test_windows_discovery_uses_exe_and_requires_llama_dlls(tmp_path, monkeypatch):
+    from app.ai.jev import model_manager
+
+    monkeypatch.setattr(model_manager, "IS_WINDOWS", True)
+    manager = JevStyleModelManager(root=_make_fake_bundle(tmp_path))
+    spec = manager.discover()[0]
+    assert spec.scorer_path.name == "jev-score.exe"
+    assert spec.scorer_path.parent.name == "windows"
+    assert spec.verified is True
+    assert not spec.problems
+
+    (tmp_path / "runtime" / "windows" / "ggml-base.dll").unlink()
+    spec = manager.discover()[0]
+    assert "ggml-base.dll" in " ".join(spec.problems)
+    assert spec.verified is False
+
+
+def test_mac_discovery_does_not_pick_windows_exe(tmp_path, monkeypatch):
+    from app.ai.jev import model_manager
+
+    monkeypatch.setattr(model_manager, "IS_WINDOWS", False)
+    manager = JevStyleModelManager(root=_make_fake_bundle(tmp_path))
+    spec = manager.discover()[0]
+    assert spec.scorer_path is None
+    assert "scorer binary" in " ".join(spec.problems)
+    # macOS build dir is the only accepted location on POSIX
+    (tmp_path / "models" / "jev-style" / "0.8b-v3" / "build").mkdir()
+    (tmp_path / "models" / "jev-style" / "0.8b-v3" / "build" / "jev-score").write_bytes(b"binary")
+    spec = manager.discover()[0]
+    assert spec.scorer_path.name == "jev-score"

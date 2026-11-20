@@ -105,12 +105,16 @@ def build(target: str, debug: bool, skip_tests: bool = False, rule_only: bool = 
     ]
     if not rule_only:
         args.append(f"--add-data={ROOT / 'models'}{pathsep()}models")
+        runtime = ROOT / "runtime"
+        if runtime.exists():
+            # runtime/windows/{jev-score.exe, llama.dll, ...} for the offline AI layer
+            args.append(f"--add-data={runtime}{pathsep()}runtime")
     # models/jev-style/<release>/build/ 안에는 scorer와 self-contained dylib이
     # 함께 들어 있어 위 add-data 하나로 폐쇄망 bundle이 완성된다.
     jev = ROOT / "models" / "jev-style"
     if jev.exists():
-        # 공식 GGUF runtime은 data 파일로 번들되므로 PyInstaller의静态 분석이
-        # numpy/tokenizersimport를 못 finds. hidden-import로 Explicit히 포함한다.
+        # The official GGUF runtime ships as data, so PyInstaller's static
+        # analysis cannot see the numpy / tokenizers imports it performs.
         args += ["--hidden-import=numpy", "--hidden-import=tokenizers"]
         native = ROOT / "vendor" / "llama.cpp" / "build" / "bin"
         for release in sorted(p for p in jev.iterdir() if p.is_dir()):

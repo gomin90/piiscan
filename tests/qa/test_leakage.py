@@ -194,3 +194,14 @@ def test_llm_exception_is_not_fatal(fixture_path: Path):
     assert result.results, "rule based result disappeared when AI raised"
     hits = scan(stream.getvalue())
     assert not hits, f"raw personal data in AI failure output: {hits}"
+
+
+def test_json_report_and_diagnostic_dump_are_clean(fixture_path: Path):
+    """`--json` / `--report-json` payloads and the diagnostics dump carry no raw values."""
+    diagnostics = Diagnostics(enabled=True)
+    result = analyse_file(fixture_path, diagnostics=diagnostics)
+
+    for payload in (json.dumps(result.as_dict(), ensure_ascii=False),
+                    json.dumps({"events": diagnostics.events}, ensure_ascii=False)):
+        hits = scan(payload)
+        assert not hits, f"raw personal data in JSON report: {hits}"

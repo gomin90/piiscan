@@ -244,8 +244,14 @@ Example AI state actually sent (masked):
   (`0afb4d7b…` for 0.8B v3, `3d49b5b2…` for 2B v4), quantization, per-file SHA256/size,
   llama.cpp ref `b94959a64d011915d77a5381c7d4846dcda99530`, and packaging date;
   [models/jev-style/THIRD-PARTY-NOTICES.md](../models/jev-style/THIRD-PARTY-NOTICES.md) covers licences.
-- GGUF binaries are deliberately **not** committed (`.gitignore`) but are included in the PyInstaller
-  bundle from the local directory.
+- Git LFS now tracks the distributable binaries (`*.gguf`, `*.whl`, `*.dll`, `*.exe`) so the
+  offline bundle can be cloned or zipped without any download at run time:
+  `git lfs install && git clone https://github.com/gomin90/piiscan.git`.
+- `tools/make_bundle_manifest.py` writes `manifests/offline-bundle-manifest.json` (SHA256 + size of
+  every distributable file) and `--verify` re-hashes the tree; `scripts/windows/verify-offline-bundle.ps1`
+  performs the same check on Windows.
+- `tools/make_release_bundle.py` builds `dist/piiscan-offline-bundle.zip` (206 files, 2,255 MB) for a
+  GitHub Release asset; GitHub's own "Download ZIP" only serves LFS *pointers*.
 
 ---
 
@@ -259,7 +265,9 @@ Example AI state actually sent (masked):
 | `llama-cpp-python` legacy LLM path | Not installed here; `auto` falls back to it only when no Jev model is present, untested in this env. |
 | Multi-threaded / parallel inference | Not implemented: one scorer process, `threads=4`, concurrency = 1 as specified. |
 | Threshold tuning from held-out data | Margin threshold 0.05 is only used to flag `requires_review`; no auto-threshold optimisation. |
-| Windows-native scorer build | Documented (`build_jev_score.sh`), not executed. |
+| Windows-native scorer build | Cross-built with MinGW on macOS (`runtime/windows/jev-score.exe`, `jev-score-v2.exe`); **never executed on Windows**. |
+| Windows wheelhouse install / EXE run | Wheels fetched and hash-verified, dependency closure checked (`tools/verify_wheelhouse.py`); not installed or run on Windows. |
+| Git LFS push of the ~2.3 GB bundle | Depends on GitHub access; see §14. |
 
 ---
 
@@ -305,7 +313,15 @@ Evidence:
 ./.venv/bin/python tools/gui_check.py                -> results/gui_*.png
 
 # 6. full suite
-./.venv/bin/python -m pytest tests -q                # 92 passed
+./.venv/bin/python -m pytest tests -q                # 95 passed
+
+# 7. offline distribution artefacts (macOS side)
+./.venv/bin/python tools/make_wheelhouse_lock.py     # requirements/requirements-lock.txt
+./.venv/bin/python tools/verify_wheelhouse.py        # dependency closure check
+./.venv/bin/python tools/make_bundle_manifest.py     # manifests/offline-bundle-manifest.json
+./.venv/bin/python tools/make_bundle_manifest.py --verify
+./.venv/bin/python tools/make_release_bundle.py      # dist/piiscan-offline-bundle.zip
+./.venv/bin/python tools/jev_smoke.py --model 0.8b-v3 --cpu-only
 ```
 
 Manual CLI check:
@@ -320,7 +336,39 @@ Manual CLI check:
 ## 14. Git status
 
 - Base commit for this work: `1b3e28d` (GUI/QA baseline).
-- This Jev-Style layer is committed as `3085778` ("Add Jev-Style decision-model AI
-  layer with offline packaging") — see `git log --oneline`.
-- Model binaries are untracked: `models/jev-style/*/*.gguf`, `models/jev-style/*/tokenizer/`,
-  `vendor/` (see `.gitignore`). `git status` is clean for tracked files after the commit.
+- Jev-Style layer: `3085778` ("Add Jev-Style decision-model AI layer with offline packaging"),
+  then `c5d2c72` (documentation of the measured results).
+- The Windows offline bundle (models, tokenizer, native Windows runtime, wheelhouse, scripts,
+  manifest, licences) is committed in the follow-up commit; the large binaries are Git LFS objects,
+  so `git status` after the commit is clean.
+---
+
+## 15. Windows offline bundle - what the macOS machine produced
+
+The Windows runtime could not be executed here, so the deliverable is a
+verified-on-macOS **bundle** plus the scripts the user runs on Windows.
+
+| Artifact | How it was produced | Evidence available | Executed on Windows? |
+|---|---|---|---|
+| `vendor/wheels/` (31 wheels, 104.8 MB) | `pip download --platform win_amd64 --only-binary=:all: --python-version 3.12` | `requirements/requirements-lock.txt` (name, size, SHA256); `tools/verify_wheelhouse.py` proves the dependency closure | no |
+| `models/jev-style/0.8b-v3` / `2b-v4` GGUF + tokenizer | `tools/jev_download_models.py` with the already-authenticated Hugging Face CLI | `manifest.json` per release (repo, revision, SHA256, size, licence) | no (loaded on macOS) |
+| `runtime/windows/jev-score.exe`, `jev-score-v2.exe` | MinGW 14.0.0 cross-compile of the official `jev_score.cpp` / `jev_score_v2.cpp`, `-static`, linked against the official `llama.dll` | PE header + import table inspected with `objdump`: only non-system import is `llama.dll`; `BUILD-INFO.json` records every hash | **no** |
+| `runtime/windows/llama.dll`, `ggml*.dll`, `libomp.dll` (18 files) | official llama.cpp `b12556` `bin-win-cpu-x64` asset | SHA256 in `BUILD-INFO.json` and in the bundle manifest | no |
+| `manifests/offline-bundle-manifest.json` | `tools/make_bundle_manifest.py` over all git-tracked bundle files | 206 files / 2,286.2 MB; `--verify` reported 0 mismatches, 0 missing | re-verifiable with `verify-offline-bundle.ps1` |
+| `scripts/windows/{diagnose,verify-offline-bundle,install-offline,build-exe,fetch-cuda-backend,build-jev-score}.ps1`, `run.bat` | hand-written; syntax-checked with PowerShell 7.7 (`Parser::ParseFile` -> 0 errors) and `diagnose.ps1` / `verify-offline-bundle.ps1` dry-run against this repo | dry-run reports in `results/windows/` | **no** (Windows-only cmdlets such as `Get-CimInstance` are guarded) |
+| `docs/windows-test-guide.md`, `docs/THIRD-PARTY-NOTICES.md`, `LICENSE` | written from the recorded provenance | - | - |
+| `samples/windows_sample.csv` | synthetic, no real personal data | manifest entry | no |
+| `dist/piiscan-offline-bundle.zip` | `tools/make_release_bundle.py` | 2,255.1 MB, 206 files (not committed; regenerate on demand) | no |
+
+Honest limits:
+
+1. **No Windows execution.** DLL loading, EXE build, CPU/CUDA inference and 8 GB
+   behaviour are all still unverified.
+2. The scorer EXEs were built with MinGW, not MSVC. Official MSVC builds of the
+   scorer are not published, so the Windows test guide provides
+   `build-jev-score.ps1` for a native rebuild if the cross-built binary fails.
+3. `llama.dll` requires the Visual C++ runtime (`MSVCP140.dll`, `VCRUNTIME140.dll`).
+4. The official CUDA asset is built for CUDA 12.4; Blackwell (RTX 5060) support must
+   be confirmed on the actual machine.
+5. `llama-cpp-python` has no win_amd64 wheel, so the legacy generative LocalLLM path
+   cannot be installed offline; the Jev-Style path does not need it.

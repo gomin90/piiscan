@@ -8,11 +8,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import platform
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.config.settings import project_root
+
+IS_WINDOWS = os.name == "nt"
+# Windows용 preload된 scorer + llama.cpp DLL (cross-built on macOS, see runtime/windows/BUILD-INFO.json)
+WINDOWS_RUNTIME_DIR = "runtime/windows"
+WINDOWS_REQUIRED_DLLS = ("llama.dll", "ggml.dll", "ggml-base.dll", "libomp.dll")
 
 REGISTRY = {
     "0.8b-v3": {
@@ -138,6 +145,29 @@ class JevStyleModelManager:
 
     def __init__(self, root: Path | None = None) -> None:
         self.root = root or project_root() / "models" / "jev-style"
+        # models/jev-style -> models -> project root (keeps tests with a tmp root working)
+        self.project_root = self.root.parents[1] if len(self.root.parents) > 1 else project_root()
+
+    def _scorer_candidates(self, directory: Path, meta: dict) -> list[Path]:
+        """Platform-aware scorer search. Windows ships `*.exe` beside llama.dll."""
+        candidates: list[Path] = []
+        if IS_WINDOWS:
+            candidates.append(directory / "build" / f"{meta['scorer_bin']}.exe")
+            # pre-built offline Windows runtime (runtime/windows/jev-score.exe)
+            candidates.append(self.project_root / WINDOWS_RUNTIME_DIR / f"{meta['scorer_bin']}.exe")
+        else:
+            candidates.append(directory / "build" / meta["scorer_bin"])
+        return candidates
+
+    def _native_libs_ok(self, scorer: Path) -> list[str]:
+        """llama.dll + friends must sit next to a Windows scorer, else it cannot start."""
+        if not IS_WINDOWS:
+            return []
+        missing = [dll for dll in WINDOWS_REQUIRED_DLLS if not (scorer.parent / dll).is_file()]
+        # ggml loads the CPU backend dynamically; at least one variant must be present.
+        if not list(scorer.parent.glob("ggml-cpu-*.dll")):
+            missing.append("ggml-cpu-*.dll")
+        return missing
 
     def discover(self) -> list[JevStyleModelSpec]:
         specs: list[JevStyleModelSpec] = []
@@ -155,9 +185,10 @@ class JevStyleModelManager:
                 except (json.JSONDecodeError, OSError):
                     expected = None
 
-            candidate_scorers = [directory / "build" / meta["scorer_bin"]]
-            env_bin = Path(__import__("os").environ.get("JEV_SCORE_BIN", "")) if meta["scorer_bin"] == "jev-score" else Path(
-                __import__("os").environ.get("JEV_SCORE_V2_BIN", ""))
+            candidate_scorers = self._scorer_candidates(directory, meta)
+            env_bin = Path(os.environ.get(
+                "JEV_SCORE_BIN" if meta["scorer_bin"] == "jev-score" else "JEV_SCORE_V2_BIN", ""
+            ))
             if env_bin.is_file():
                 candidate_scorers.append(env_bin)
             scorer = next((path for path in candidate_scorers if path.is_file()), None)
@@ -177,6 +208,9 @@ class JevStyleModelManager:
                 problems.append("readout_config.json missing (calibrated temperatures unavailable)")
             if scorer is None:
                 problems.append(f"scorer binary '{meta['scorer_bin']}' not built (run build_jev_score.sh)")
+            else:
+                for dll in self._native_libs_ok(scorer):
+                    problems.append(f"scorer {scorer.name} missing native library {dll}")
 
             specs.append(
                 JevStyleModelSpec(

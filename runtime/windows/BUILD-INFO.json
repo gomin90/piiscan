@@ -1,0 +1,162 @@
+{
+  "schema": "piiscan-windows-runtime/1.0",
+  "generated_at": "2026-11-20",
+  "purpose": "Jev-Style decision scorer + llama.cpp native library for Windows x64, shipped inside the offline bundle.",
+  "llama_cpp": {
+    "source_commit": "b94959a64d011915d77a5381c7d4846dcda99530",
+    "release_tag": "b12556",
+    "cpu_binary_asset": "https://github.com/ggml-org/llama.cpp/releases/download/b12556/llama-b12556-bin-win-cpu-x64.zip",
+    "cpu_binary_sha256": "98882a3ca45688ffa585c3adba49213ca90c5b2dbbf1bc2af41ac437a0987d17",
+    "note": "llama.dll / ggml*.dll / libomp.dll in this directory are the official MSVC-built llama.cpp b12556 Windows x64 binaries extracted from that asset (the .zip is kept here for re-extraction)."
+  },
+  "scorer": {
+    "jev-score.exe": {
+      "model": "Jev-Style-0.8B-Decision-v3",
+      "protocol": "jev-score",
+      "source": "models/jev-style/0.8b-v3/jev_score.cpp",
+      "toolchain": "x86_64-w64-mingw32-g++ 14.0.0 (MinGW-w64), -O2 -static, built on macOS 15 Apple Silicon",
+      "linked_against": [
+        "llama.dll",
+        "ggml.dll",
+        "ggml-base.dll"
+      ],
+      "sha256": "6ab05178af3fca18a802b748cdeee6ef54bef6ea4aa16d81e128a3b1f2f68972",
+      "size_bytes": 13241936,
+      "execution_status": "NOT executed on Windows. PE format and import table verified with objdump. Must be validated on a Windows PC by scripts/windows/verify-offline-bundle.ps1."
+    },
+    "jev-score-v2.exe": {
+      "model": "Jev-Style-2B-Decision-v4",
+      "protocol": "jev-score-v2",
+      "source": "models/jev-style/2b-v4/jev_score_v2.cpp",
+      "toolchain": "x86_64-w64-mingw32-g++ 14.0.0 (MinGW-w64), -O2 -static, built on macOS 15 Apple Silicon",
+      "linked_against": [
+        "llama.dll",
+        "ggml.dll",
+        "ggml-base.dll"
+      ],
+      "execution_status": "NOT executed on Windows. PE format and import table verified with objdump. Must be validated on a Windows PC by scripts/windows/verify-offline-bundle.ps1."
+    }
+  },
+  "gpu_backends": {
+    "cuda_12_4_x64": {
+      "asset": "https://github.com/ggml-org/llama.cpp/releases/download/b12556/llama-b12556-bin-win-cuda-12.4-x64.zip",
+      "size_bytes": 364747106,
+      "sha256": "e18df7a7189e1446ca338aa4f04529acb4dce7537164baed2fbc624e48864932",
+      "contains": "ggml-cuda.dll (789 MB) + ggml-cpu-* + llama.dll",
+      "cuda_runtime_asset": "https://github.com/ggml-org/llama.cpp/releases/download/b12556/cudart-llama-bin-win-cuda-13.4-x64.zip",
+      "how_to_use": "Run scripts/windows/fetch-cuda-backend.ps1 once on a connected machine, copy the DLLs into runtime/windows/, then run fully offline.",
+      "status": "availability verified (asset exists, size/hash recorded). RTX 5060 / CUDA execution is NOT verified."
+    }
+  },
+  "runtime_dlls": [
+    "llama.dll",
+    "ggml.dll",
+    "ggml-base.dll",
+    "libomp.dll",
+    "ggml-cpu-x64.dll",
+    "ggml-cpu-sse42.dll",
+    "ggml-cpu-ivybridge.dll",
+    "ggml-cpu-piledriver.dll",
+    "ggml-cpu-sandybridge.dll",
+    "ggml-cpu-haswell.dll",
+    "ggml-cpu-alderlake.dll",
+    "ggml-cpu-icelake.dll",
+    "ggml-cpu-skylakex.dll",
+    "ggml-cpu-cascadelake.dll",
+    "ggml-cpu-cooperlake.dll",
+    "ggml-cpu-sapphirerapids.dll",
+    "ggml-cpu-cannonlake.dll",
+    "ggml-cpu-zen4.dll"
+  ],
+  "built_at": "2026-11-20",
+  "files": {
+    "BUILD-INFO.json": {
+      "size": 3194,
+      "sha256": "e4cdaa34c379fea620d98a032fc065985c03d28c3548459792cd8d4e42b9797e"
+    },
+    "ggml-base.dll": {
+      "size": 840704,
+      "sha256": "c527cf6a057a84b8211698dfa01d9fc7698779dd42f14f836fa04544473fcd00"
+    },
+    "ggml-cpu-alderlake.dll": {
+      "size": 1496576,
+      "sha256": "9247c23c4d010073aea1b8718804fbd8d05cefa063637d7b0242f5575086e660"
+    },
+    "ggml-cpu-cannonlake.dll": {
+      "size": 1731584,
+      "sha256": "a0948065fc41831ab24d66bdca12b3c2b3902e94475d9585fe2c0462b50c3aef"
+    },
+    "ggml-cpu-cascadelake.dll": {
+      "size": 1700352,
+      "sha256": "f2fa0b3db2aca65e22157e4007c95e552d2b26313050c317365dcdbaa8f178b9"
+    },
+    "ggml-cpu-cooperlake.dll": {
+      "size": 1709568,
+      "sha256": "7687c91ddc5a26b20efaaca166abb8de2b9b7e2086bad0769d0c7fbd5943d4f7"
+    },
+    "ggml-cpu-haswell.dll": {
+      "size": 1503232,
+      "sha256": "d1da26d62da8cc165bdfb6940e20f92948301760c13696cddbca7f03df5f5050"
+    },
+    "ggml-cpu-icelake.dll": {
+      "size": 1708544,
+      "sha256": "08b45932cd8051eb9e6857323fe0bbf54a1c3925b91ca10e962653fb86bfb70a"
+    },
+    "ggml-cpu-ivybridge.dll": {
+      "size": 1370112,
+      "sha256": "dc216ccf1c05492131c331865dc1d809497bcc728cec23db32b5cd699890971f"
+    },
+    "ggml-cpu-piledriver.dll": {
+      "size": 1365504,
+      "sha256": "f3b04e47a437af6b7060e7917701b52f98d7fb22d9ed351b599d5c6e64da0f5e"
+    },
+    "ggml-cpu-sandybridge.dll": {
+      "size": 1339904,
+      "sha256": "dcc3448c44b0a9a5916959a536ba650341500cee079f60b457b3f568a4d445e0"
+    },
+    "ggml-cpu-sapphirerapids.dll": {
+      "size": 1988608,
+      "sha256": "4e18f663449a526decae39ee3b0ec6aacc0698708726869553900be0aaa27ddc"
+    },
+    "ggml-cpu-skylakex.dll": {
+      "size": 1722880,
+      "sha256": "b95e95754a5146fe8820b60491ed41112ff3fde4c0f115c2ce4454366c5f82fb"
+    },
+    "ggml-cpu-sse42.dll": {
+      "size": 963072,
+      "sha256": "12d24817895339ec517b5aac0fade2c5e7f796fec00d3552f474fe73b813508f"
+    },
+    "ggml-cpu-x64.dll": {
+      "size": 956928,
+      "sha256": "3ffc1c9f15a6f05063447e56010032b021400819a026cb4448e20a46844a6858"
+    },
+    "ggml-cpu-zen4.dll": {
+      "size": 1718272,
+      "sha256": "d828eb2738927a5349922bea1aa857d50914c37a34ffb63a127d6aad6ebbf1ad"
+    },
+    "ggml.dll": {
+      "size": 78336,
+      "sha256": "a2d48a3a177ff603119364e70fde7d3239170af12e4621ab67db9ccd86c8863f"
+    },
+    "jev-score-v2.exe": {
+      "size": 13251363,
+      "sha256": "647b27e38815801c4c75636a4b357c77772cbd4ccf325bbbf26b5780c5f87773"
+    },
+    "jev-score.exe": {
+      "size": 13241936,
+      "sha256": "6ab05178af3fca18a802b748cdeee6ef54bef6ea4aa16d81e128a3b1f2f68972"
+    },
+    "libomp.dll": {
+      "size": 856064,
+      "sha256": "1e4222f195d84e7355109d778e751dfe3c085e42c947f7fe3d7853181329dd40"
+    },
+    "llama-b12556-bin-win-cpu-x64.zip": {
+      "size": 24876692,
+      "sha256": "98882a3ca45688ffa585c3adba49213ca90c5b2dbbf1bc2af41ac437a0987d17"
+    },
+    "llama.dll": {
+      "size": 3955200,
+      "sha256": "a07715b34b90dd9263a5629890c88ba74464d41a17e24ac117883d4707d9e4d7"
+    }
+  }
+}

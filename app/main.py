@@ -47,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cpu-only", action="store_true", help="Metal/GPU 없이 CPU로 AI 추론")
     parser.add_argument("--debug", action="store_true", help="진단 로그 출력")
     parser.add_argument("--json", action="store_true", help="JSON 요약 stdout")
+    parser.add_argument("--report-json", help="실행/진단 결과를 JSON 파일로 저장 (원문 개인정보 없음)")
     parser.add_argument("--gui", action="store_true", help="PySide6 GUI 실행")
     return parser
 
@@ -111,15 +112,24 @@ def run_cli(args) -> int:
     txt_path = write_txt(results, output_dir / f"privacy_report_{timestamp}.txt")
     logger.info("결과: %s / %s", csv_path, txt_path)
 
+    report = {
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "hardware": hardware.as_dict(),
+        "ai": llm.summary(),
+        "files": [r.as_dict() for r in results],
+    }
+
     if args.debug:
         diagnostics.dump(output_dir / f"diagnostics_{timestamp}.json")
 
     if args.json:
-        print(json.dumps({
-            "hardware": hardware.as_dict(),
-            "ai": llm.summary(),
-            "files": [r.as_dict() for r in results],
-        }, ensure_ascii=False, indent=2))
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+
+    if args.report_json:
+        path = Path(args.report_json)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("진단 보고: %s", path)
     return 0
 
 
