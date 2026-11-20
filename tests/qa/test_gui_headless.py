@@ -79,6 +79,40 @@ def test_gui_exports_do_not_contain_raw_values(app, gui_csv, tmp_path, monkeypat
     assert len(csv_files[0].read_text(encoding="utf-8").splitlines()) > 1
 
 
+def test_gui_form_fields_reach_the_report(app, gui_csv, tmp_path, monkeypatch):
+    """분석 방식 / 테이블명 / 스키마 / 원본 DB 입력이 결과 CSV에 recorded."""
+    window = MainWindow()
+    window.settings_window.mode_box.setCurrentText("full")
+    window.settings_window.table_box.setText("CUSTOMERS")
+    window.settings_window.schema_box.setText("PROD")
+    window.settings_window.db_box.setText("Oracle")
+    window.selector.files = [gui_csv]
+    monkeypatch.chdir(tmp_path)
+    window.run_analysis()
+
+    csv_path = sorted((tmp_path / "results").glob("privacy_results_*.csv"))[0]
+    text = csv_path.read_text(encoding="utf-8-sig")
+    assert "CUSTOMERS" in text and "PROD" in text and "Oracle" in text
+    assert window.config.mode == "full"
+
+
+def test_result_detail_shows_row_level_hits(app, gui_csv, tmp_path, monkeypatch):
+    window = MainWindow()
+    window.selector.files = [gui_csv]
+    monkeypatch.chdir(tmp_path)
+    window.run_analysis()
+
+    hits = sorted((tmp_path / "results").glob("privacy_hits_*.csv"))
+    assert hits, "GUI run must write the row-level hit report"
+    text = hits[0].read_text(encoding="utf-8-sig")
+    assert "행번호" in text and "탐지값(마스킹)" in text
+
+    first = window.result_window.rows[0]
+    window.result_window.show_detail(first)
+    assert window.result_window.hit_table.rowCount() > 0
+    assert window.result_window.hit_table.item(0, 4).text()  # masked value column
+
+
 def test_debug_off_leaves_diagnostics_empty(app, gui_csv, tmp_path, monkeypatch):
     window = MainWindow()
     window.config.debug = False
