@@ -20,7 +20,25 @@ macOS 개발 machine에서 Windows EXE/DLL 추론은 실행할 수 없으므로,
 | 8GB RAM Windows | macOS 실측 2,319 MB (0.8B CPU) / 3,721 MB (2B CPU) | 미검증 |
 | Windows PyInstaller EXE | build 스크립트 준비 완료 | 빌드/실행 미검증 |
 
-## 1. 준비
+## 1. distribution / 준비
+
+GitHub's own "Download ZIP" only contains Git LFS **pointers**, so use one of:
+
+```bash
+# A) clone with LFS (needs internet once)
+git lfs install
+git clone https://github.com/gomin90/piiscan.git
+```
+
+```text
+# B) GitHub Release assets (each part is below GitHub's 2 GiB asset limit)
+piiscan-app.zip            527.6 MB  186 files  code, runtime, wheels, scripts, docs, manifest
+piiscan-model-0.8b.zip     508.6 MB   13 files  0.8B v3 GGUF + tokenizer
+piiscan-model-2b.zip      1219.1 MB   13 files  2B v4 GGUF + tokenizer
+```
+
+Unzip **all three parts into the same folder** (they share one directory tree), then
+run the integrity check in section 2. Built with `python tools/make_release_bundle.py --split`.
 
 - Windows 10/11 x64
 - Python 3.12 x64 (EXE 없이 source 실행 시) — 3.11 also works, but the wheelhouse is pinned for 3.12

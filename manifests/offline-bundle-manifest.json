@@ -1,8 +1,8 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-20T03:44:41.109462+00:00",
+  "generated_at": "2026-11-20T03:50:07.002926+00:00",
   "git": {
-    "commit": "c5d2c725150c0d2ead8a67ec5d4f6c54381a0f59",
+    "commit": "67e0aa09ab13378ff235171f86b6d1da317bfeac",
     "branch": "main",
     "repository": ""
   },
@@ -32,7 +32,7 @@
     }
   },
   "file_count": 212,
-  "total_bytes": 2397378161,
+  "total_bytes": 2397381745,
   "total_mb": 2286.3,
   "files": [
     {
@@ -55,8 +55,8 @@
     },
     {
       "path": "README.md",
-      "size": 4848,
-      "sha256": "d864bd12078a10c598c60f39abcd45e6c842d4fe4d0dbc1d18a8ba0324fea6e5",
+      "size": 5420,
+      "sha256": "4b59f44525042b8808725cf553ffc9d8875ad0abe65f7ac263192ff3ae173d23",
       "category": "other"
     },
     {
@@ -475,8 +475,8 @@
     },
     {
       "path": "docs/windows-test-guide.md",
-      "size": 7348,
-      "sha256": "c50cb1b18794f7bb6c99e9f313bfb2dac808c9ba23e7fe9fef024d5a0dcf6247",
+      "size": 8072,
+      "sha256": "a8db879164f01c11450ea4d8a84bdcf5c896143562c539827d533e7f39e852a9",
       "category": "docs"
     },
     {
@@ -1081,8 +1081,8 @@
     },
     {
       "path": "tools/make_release_bundle.py",
-      "size": 3144,
-      "sha256": "614e6f6424b157109c44a100e9d47b9c04e0ddc41e1b31636345a84b3d960d91",
+      "size": 5432,
+      "sha256": "680778033221abe9b3339c692a3d2ec52b23fcef3dc2cf0d8a91f89e14040439",
       "category": "other"
     },
     {
