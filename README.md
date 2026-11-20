@@ -94,12 +94,12 @@ git lfs install
 git clone https://github.com/gomin90/piiscan.git
 ```
 
-GitHub's "Download ZIP" only serves LFS **pointers**, and the whole bundle is 2.29 GB
+GitHub's "Download ZIP" only serves LFS **pointers**, and the whole bundle is 2.31 GB
 (above GitHub's 2 GiB per-asset limit), so the Release assets are split. Download all
 three and unzip them into one directory:
 
 ```
-piiscan-app.zip          527.6 MB   code, native runtime, wheelhouse, scripts, docs, manifest
+piiscan-app.zip          552.0 MB   code, native runtime, wheelhouse, scripts, docs, manifest
 piiscan-model-0.8b.zip   508.6 MB   0.8B v3 GGUF + tokenizer
 piiscan-model-2b.zip    1219.1 MB   2B v4 GGUF + tokenizer
 ```
