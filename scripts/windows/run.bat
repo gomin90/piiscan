@@ -11,20 +11,24 @@ setlocal
 set ROOT=%~dp0..\..
 set EXE=%ROOT%\dist\PrivacyScanner.exe
 set OUT=%ROOT%\results\windows
+set ARGS=%*
+
+rem no arguments -> open the GUI
+if "%ARGS%"=="" set ARGS=--gui
 
 if not exist "%OUT%" mkdir "%OUT%"
 
 if exist "%EXE%" (
-    echo [run] %EXE%
-    "%EXE%" %*
+    echo [run] %EXE% %ARGS%
+    "%EXE%" %ARGS%
     goto :end
 )
 
 where python >nul 2>nul
 if %errorlevel%==0 (
-    echo [run] python -m app.main  (EXE 없음: python으로 실행)
+    echo [run] python -m app.main %ARGS%   (EXE 없음: python으로 실행)
     cd /d "%ROOT%"
-    python -m app.main %*
+    python -m app.main %ARGS%
     goto :end
 )
 

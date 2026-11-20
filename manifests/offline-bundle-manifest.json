@@ -1,11 +1,11 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-20T04:56:58.248144+00:00",
+  "generated_at": "2026-11-20T05:12:35.854018+00:00",
   "git": {
-    "commit": "58a6c4283586767f7b3b564f0babcc89909d4bd0",
+    "commit": "6b032d6dbf71427b5a8032976a604b28843f93e0",
     "branch": "main",
     "repository": "https://github.com/gomin90/piiscan.git",
-    "generated_at": "2026-11-20T04:56:58.285372+00:00"
+    "generated_at": "2026-11-20T05:12:35.890408+00:00"
   },
   "target": {
     "windows": {
@@ -33,7 +33,7 @@
     }
   },
   "file_count": 212,
-  "total_bytes": 2397382296,
+  "total_bytes": 2397382360,
   "total_mb": 2286.3,
   "files": [
     {
@@ -854,8 +854,8 @@
     },
     {
       "path": "scripts/windows/run.bat",
-      "size": 1032,
-      "sha256": "97bdb2e9ac43b6c1f5b31b7506af5601daab1d6385ce43c84cf9f957021e8104",
+      "size": 1096,
+      "sha256": "98f61d06b6b8243d66869cf1b7c11bcfc0b5c0f99a415d530ffe2b8e727e000c",
       "category": "scripts"
     },
     {
