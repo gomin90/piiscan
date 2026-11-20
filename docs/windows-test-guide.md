@@ -32,6 +32,7 @@ git clone https://github.com/gomin90/piiscan.git
 
 ```text
 # B) GitHub Release assets (each part is below GitHub's 2 GiB asset limit)
+#    https://github.com/gomin90/piiscan/releases/tag/v0.3.0
 piiscan-app.zip            527.6 MB  186 files  code, runtime, wheels, scripts, docs, manifest
 piiscan-model-0.8b.zip     508.6 MB   13 files  0.8B v3 GGUF + tokenizer
 piiscan-model-2b.zip      1219.1 MB   13 files  2B v4 GGUF + tokenizer

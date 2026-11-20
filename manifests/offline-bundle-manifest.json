@@ -1,8 +1,8 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-20T03:55:38.798255+00:00",
+  "generated_at": "2026-11-20T04:41:28.999156+00:00",
   "git": {
-    "commit": "5425abd33331ac6e2d71191bfdf4acf2668c9a6e",
+    "commit": "a3fd1130353c5a8293707b5a1fdb37f29324609e",
     "branch": "main",
     "repository": ""
   },
@@ -32,7 +32,7 @@
     }
   },
   "file_count": 212,
-  "total_bytes": 2397381913,
+  "total_bytes": 2397382069,
   "total_mb": 2286.3,
   "files": [
     {
@@ -55,8 +55,8 @@
     },
     {
       "path": "README.md",
-      "size": 5420,
-      "sha256": "4b59f44525042b8808725cf553ffc9d8875ad0abe65f7ac263192ff3ae173d23",
+      "size": 5516,
+      "sha256": "d41be07407b88bf1b893e2f8fe5ab7cddc39001fe803b679beb5cbf8a9dd9ee6",
       "category": "other"
     },
     {
@@ -475,8 +475,8 @@
     },
     {
       "path": "docs/windows-test-guide.md",
-      "size": 8072,
-      "sha256": "a8db879164f01c11450ea4d8a84bdcf5c896143562c539827d533e7f39e852a9",
+      "size": 8132,
+      "sha256": "9711cfcfa1470268f4c3670e7d3bda0cb7af41a2b315ea4a887ea6b06b24c6bd",
       "category": "docs"
     },
     {
