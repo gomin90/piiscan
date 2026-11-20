@@ -116,7 +116,10 @@ def git_info() -> dict:
     return {
         "commit": sha,
         "branch": run("git", "rev-parse", "--abbrev-ref", "HEAD"),
-        "repository": run("git", "config", "get", "user.name"),
+        "repository": run("git", "remote", "get-url", "origin"),
+        # A manifest cannot hash itself, so the commit that contains this file is
+        # always the *next* one; consumers compare file hashes, not this field.
+        "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
 

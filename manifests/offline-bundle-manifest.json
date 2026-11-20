@@ -1,10 +1,11 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-20T04:51:15.958985+00:00",
+  "generated_at": "2026-11-20T04:56:58.248144+00:00",
   "git": {
-    "commit": "53b9eb61d2b739dcb63d9f339e448db48839e1d0",
+    "commit": "58a6c4283586767f7b3b564f0babcc89909d4bd0",
     "branch": "main",
-    "repository": ""
+    "repository": "https://github.com/gomin90/piiscan.git",
+    "generated_at": "2026-11-20T04:56:58.285372+00:00"
   },
   "target": {
     "windows": {
@@ -32,7 +33,7 @@
     }
   },
   "file_count": 212,
-  "total_bytes": 2397382069,
+  "total_bytes": 2397382296,
   "total_mb": 2286.3,
   "files": [
     {
@@ -1075,8 +1076,8 @@
     },
     {
       "path": "tools/make_bundle_manifest.py",
-      "size": 5761,
-      "sha256": "d6ba8942b361f4438c4234188bf9634febb1fc443c6bc42fec8145b526e4babf",
+      "size": 5988,
+      "sha256": "a2f3d9e163923ae84dfd91acb75d26230c97cca84e6dc94775421016cbfe51be",
       "category": "other"
     },
     {
