@@ -1,0 +1,207 @@
+"""QA: Jev-Style decision-model AI layer (fallback, privacy, integrity)."""
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+
+import pytest
+
+from app.ai.jev.adapter import JevStyleAdapter, build_column_state, redact_sample, shape_pattern
+from app.ai.jev.decision import (
+    JEV_TYPE_TO_INTERNAL,
+    PERSONALITY_OPTIONS,
+    TYPE_OPTIONS,
+    JevStyleDecisionRequest,
+)
+from app.ai.jev.engine import JevStyleEngine
+from app.ai.jev.model_manager import JevStyleModelManager
+from app.config.settings import AnalysisConfig
+from app.core.analysis_service import analyse_file
+
+
+class FakeEngine:
+    """Deterministic stand-in for the official Jev-Style GGUF runtime."""
+
+    def __init__(self, answer_map=None, fail=False):
+        self.answer_map = answer_map or {}
+        self.fail = fail
+        self.states: list[dict] = []
+        self.info = {"backend": "cpu", "model": "fake"}
+
+    def _answer(self, options):
+        names = list(options)
+        return names[0] if names else "UNCERTAIN"
+
+    def decide(self, state, question, options=None, qtype="choice", category=None):
+        self.states.append({"state": state, "question": question, "options": options})
+        if self.fail:
+            raise RuntimeError("scorer crashed")
+        options = options or {"true": None, "false": None}
+        answer = self.answer_map.get(question, self._answer(options))
+        n = len(options)
+        probs = {name: (0.9 if name == answer else (0.1 / max(n - 1, 1))) for name in options}
+        return {"answer": answer, "probabilities": probs, "top_probability": probs[answer],
+                "input_tokens": 100, "backend": "cpu", "model": "fake"}
+
+    def decide_many(self, state, questions, category=None):
+        return [self.decide(state, q["ins"], q["crit"], q["t"], category) for q in questions]
+
+    def close(self):
+        pass
+
+
+def test_redaction_never_keeps_full_digits():
+    for raw in ["010-1234-5678", "900101-1234567", "john.doe@example.com",
+                "4111 1111 1111 1111", "서울시 강남区区 121", "1990-01-01"]:
+        redacted = redact_sample(raw)
+        assert len(re.findall(r"\d", redacted)) <= 3, f"too many digits kept: {redacted} <- {raw}"
+        assert raw not in redacted
+
+
+def test_shape_pattern_is_reversible_free():
+    assert shape_pattern("010-1234-5678") == "999-9999-9999"
+    assert shape_pattern("abc") == "aaa"
+    assert shape_pattern("ABC-12") == "AAA-99"
+    assert "1234" not in shape_pattern("010-1234-5678")
+
+
+def test_column_state_contains_no_raw_samples():
+    state = build_column_state({
+        "schema": "TB", "table": "MEMBER", "column": "PHONE_RAW",
+        "stats": {"rows": 3, "non_empty": 3, "null": 0, "distinct_estimate": 3,
+                  "samples": ["010-1234-5678", "9001011234567", "john@example.com"]},
+    })
+    rendered = json.dumps(state, ensure_ascii=False)
+    for raw in ("010-1234-5678", "9001011234567", "john@example.com"):
+        assert raw not in rendered
+    assert state["value_patterns"], "state must carry value-shape patterns"
+    assert state["charset"]["digit"] > 0.5
+
+
+def test_adapter_without_model_is_inert():
+    adapter = JevStyleAdapter(None, None)
+    assert adapter.load() is False
+    assert "모델 없음" in adapter.status
+    result = adapter.decide(JevStyleDecisionRequest("type", {}, "q", TYPE_OPTIONS))
+    assert result.error and not result.ok
+    assert adapter.classify_column({"column": "A"})["privacy_type"] == "UNCERTAIN"
+    adapter.close()
+
+
+def test_adapter_reports_integrity_failure():
+    manager = JevStyleModelManager()
+    specs = manager.discover()
+    if not specs:
+        pytest.skip("Jev-Style 모델이 패키지에 없음 (offline build required)")
+    from dataclasses import replace
+    spec = replace(specs[0], verified=False, scorer_path=None)
+    adapter = JevStyleAdapter(spec, None)
+    assert adapter.load() is False
+    assert "무결성" in adapter.status or "scorer" in adapter.status
+
+
+def test_engine_decision_path_with_fake_engine():
+    adapter = JevStyleAdapter(None, None)
+    engine = FakeEngine()
+    adapter.engine = engine
+    adapter.backend = "cpu"
+    column = {"schema": "TB", "table": "T", "column": "USER_NM",
+              "stats": {"rows": 5, "non_empty": 5, "null": 0, "distinct_estimate": 5,
+                       "samples": ["김길동", "이철수"]}}
+    outcome = adapter.classify_column(column)
+    assert outcome["privacy_type"] in JEV_TYPE_TO_INTERNAL.values()
+    assert "USER_NM" in json.dumps(engine.states, ensure_ascii=False)
+    for entry in engine.states:
+        rendered = json.dumps(entry["state"], ensure_ascii=False)
+        assert "김길동" not in rendered
+
+
+def test_rule_results_survive_ai_failure():
+    """AI crashes -> rule findings must still be present in the result rows."""
+    engine = JevStyleEngine(AnalysisConfig(use_ai=True))
+    engine.adapter = JevStyleAdapter(None, None)
+    engine.adapter.engine = FakeEngine(fail=True)
+    result = analyse_file(Path("tests/fixtures/synthetic/mixed_pii.csv"), llm=engine)
+    assert result.results, "rule-based rows disappeared when AI failed"
+    assert any(row.method == "규칙" or row.rule_confidence > 0 for row in result.results)
+    assert result.ai_summary["engine"] == "jev-style"
+
+
+def test_ai_disabled_keeps_rules():
+    result = analyse_file(Path("tests/fixtures/synthetic/mixed_pii.csv"), AnalysisConfig(use_ai=False))
+    assert result.results
+    assert all(row.ai_confidence == 0.0 for row in result.results)
+
+
+def test_ai_states_sent_to_model_contain_no_raw_pii(tmp_path: Path):
+    """End-to-end: every State handed to the decision model is redacted."""
+    from tests.qa.test_leakage import RAW_VALUES, build_fixture
+
+    path = tmp_path / "jev_canary.csv"
+    build_fixture(path)
+    engine = JevStyleEngine(AnalysisConfig(use_ai=True))
+    adapter = JevStyleAdapter(None, None)
+    fake = FakeEngine()
+    adapter.engine = fake
+    adapter.backend = "cpu"
+    adapter.status = "loaded"
+    engine.adapter = adapter
+
+    result = analyse_file(path, llm=engine)
+    assert result.results, "rule rows must survive with the AI layer attached"
+    payload = json.dumps(fake.states, ensure_ascii=False)
+    for raw in RAW_VALUES:
+        assert raw not in payload, f"raw personal value reached the AI state: {raw}"
+    for state in fake.states:
+        for sample in state["state"].get("masked_samples", []):
+            assert any(mark in sample for mark in "*＊") or not sample, f"unmasked sample: {sample}"
+
+
+def test_code_group_meaning_is_binary_and_measured():
+    """코드 그룹 판정은 실측으로 선택한 3-choice binary option set를 사용한다."""
+    from app.ai.jev.decision import CODE_MEANING_OPTIONS, CODE_MEANING_QUESTION
+
+    assert set(CODE_MEANING_OPTIONS) == {"PERSONAL_DATA", "SYSTEM_OR_BUSINESS_CODE", "UNCERTAIN"}
+
+    adapter = JevStyleAdapter(None, None)
+    adapter.backend = "cpu"
+    for answer, expected_relevant in (("PERSONAL_DATA", True), ("SYSTEM_OR_BUSINESS_CODE", False),
+                                      ("UNCERTAIN", False)):
+        adapter.engine = FakeEngine(answer_map={CODE_MEANING_QUESTION: answer})
+        engine = JevStyleEngine(AnalysisConfig(use_ai=True))
+        engine.adapter = adapter
+        verdict = engine.judge_code_group({"group_column": "BIZ_CD", "code_column": "BIZ_CD",
+                                          "codes": ["1100", "1200"]})
+        assert verdict is not None
+        assert verdict["meaning"] == answer
+        assert verdict["privacy_relevant"] is expected_relevant
+    adapter.close()
+
+
+def test_ram_guard_selects_smaller_model():
+    manager = JevStyleModelManager()
+    specs = manager.discover()
+    if len(specs) < 2:
+        pytest.skip("both Jev-Style models must be bundled to test the RAM guard")
+    big = max(specs, key=lambda spec: spec.size_bytes)
+    small = min(specs, key=lambda spec: spec.size_bytes)
+    assert manager.select(available_ram_gb=4.0).key == small.key
+    assert manager.select(available_ram_gb=8.0).key == small.key
+    assert manager.select(available_ram_gb=1.0) is None
+    assert manager.select(available_ram_gb=8.0, prefer=big.key).key == big.key
+
+
+def test_engine_skips_ai_when_ram_is_insufficient():
+    manager = JevStyleModelManager()
+    specs = manager.discover()
+    if not specs:
+        pytest.skip("no Jev-Style model bundled")
+    from types import SimpleNamespace
+    hardware = SimpleNamespace(available_ram_gb=1.0, backend="cpu", gpu_model="", vram_total_gb=0.0)
+    engine = JevStyleEngine(AnalysisConfig(use_ai=True), hardware)
+    assert engine.load() is False
+    assert "RAM" in engine.status
+    assert engine.summary()["skipped_reason"]
+    result = analyse_file(Path("tests/fixtures/synthetic/mixed_pii.csv"), llm=engine)
+    assert result.results, "rules must still produce findings when the model cannot load"

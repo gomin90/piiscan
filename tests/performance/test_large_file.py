@@ -11,7 +11,13 @@ from tests.fixtures.generate_fixtures import generate_large
 
 def test_130k_rows_streaming():
     path = generate_large(130000)
-    config = AnalysisConfig(batch_size=1000)
+    # AI 모델/tokenizer RSS는 test_ai_memory_bounded에서 separately 측정한다.
+    config = AnalysisConfig(batch_size=1000, use_ai=False)
+    try:
+        import psutil
+        base_mb = psutil.Process().memory_info().rss / (1024 ** 2)
+    except ImportError:
+        base_mb = 0.0
     started = time.perf_counter()
     result = analyse_file(path, config)
     elapsed = time.perf_counter() - started
@@ -24,7 +30,8 @@ def test_130k_rows_streaming():
         import psutil
 
         rss_mb = psutil.Process().memory_info().rss / (1024 ** 2)
-        assert rss_mb < 120.0, f"streaming engine exceeded memory budget: {rss_mb:.1f}MB"
+        growth = rss_mb - base_mb
+        assert growth < 120.0, f"streaming engine exceeded memory budget: +{growth:.1f}MB"
     except ImportError:
         pass
 

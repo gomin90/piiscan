@@ -17,8 +17,8 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app.ai import create_ai_engine
 from app.ai.gpu_detector import detect_hardware
-from app.ai.llm_manager import LocalLLMEngine
 from app.config.settings import AnalysisConfig
 from app.core.analysis_service import analyse_file
 from app.export.csv_exporter import write_csv
@@ -41,6 +41,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--header", choices=["yes", "no"], default=None, help="헤더 존재 여부")
     parser.add_argument("--batch-size", type=int, default=1000)
     parser.add_argument("--no-ai", action="store_true", help="AI 보조 판단 비활성화")
+    parser.add_argument("--ai-engine", choices=["auto", "jev", "llm"], default="auto",
+                        help="AI 엔진: auto(로컬 Jev-Style 우선), jev, llm")
+    parser.add_argument("--jev-model", default="auto", help="Jev-Style 모델 key (0.8b-v3, 2b-v4)")
+    parser.add_argument("--cpu-only", action="store_true", help="Metal/GPU 없이 CPU로 AI 추론")
     parser.add_argument("--debug", action="store_true", help="진단 로그 출력")
     parser.add_argument("--json", action="store_true", help="JSON 요약 stdout")
     parser.add_argument("--gui", action="store_true", help="PySide6 GUI 실행")
@@ -64,11 +68,15 @@ def run_cli(args) -> int:
     config.schema = args.schema
     config.db_type = args.db
     config.use_ai = not args.no_ai
+    config.ai_engine = args.ai_engine
+    config.jev_model = args.jev_model
     config.debug = args.debug
 
     logger = get_logger()
     diagnostics = Diagnostics(enabled=args.debug)
     hardware = detect_hardware()
+    if args.cpu_only:
+        hardware.backend = "cpu"
     logger.info("하드웨어: %s", hardware.as_dict())
 
     files = collect_files(args)
@@ -76,7 +84,7 @@ def run_cli(args) -> int:
         logger.error("분석할 CSV 파일이 없습니다. --file 또는 --folder 를 지정하세요.")
         return 2
 
-    llm = LocalLLMEngine(config, hardware)
+    llm = create_ai_engine(config, hardware)
     results = []
     for path in files:
         overrides = {}
@@ -109,6 +117,7 @@ def run_cli(args) -> int:
     if args.json:
         print(json.dumps({
             "hardware": hardware.as_dict(),
+            "ai": llm.summary(),
             "files": [r.as_dict() for r in results],
         }, ensure_ascii=False, indent=2))
     return 0

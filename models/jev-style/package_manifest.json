@@ -1,0 +1,16 @@
+{
+  "0.8b-v3": {
+    "scorer": "jev-score",
+    "self_contained": true,
+    "revision": "0afb4d7b29dbcffd0ca7d3b6c37fac56430b0b99",
+    "files": 19,
+    "total_bytes": 34978240
+  },
+  "2b-v4": {
+    "scorer": "jev-score-v2",
+    "self_contained": true,
+    "revision": "3d49b5b26c209d86bfb8fa49869aeedb384b37eb",
+    "files": 19,
+    "total_bytes": 35003000
+  }
+}

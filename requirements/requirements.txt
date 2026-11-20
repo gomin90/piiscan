@@ -1,5 +1,10 @@
-PySide6==6.7.2
-pyinstaller==6.11.1
-llama-cpp-python==0.2.90
-psutil==5.9.8
-pytest==8.3.3
+# numpy + tokenizers are required by the vendored Jev-Style GGUF runtime
+# (models/jev-style/<release>/jev_style_decision_gguf.py).
+PySide6>=6.12
+pyinstaller>=6.22
+psutil>=7.0
+pytest>=9.0
+numpy>=2.0
+tokenizers>=0.21
+# Optional: only for the legacy llama-cpp-python LocalLLM path.
+# llama-cpp-python==0.2.90

@@ -14,8 +14,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.ai import create_ai_engine
 from app.ai.gpu_detector import detect_hardware
-from app.ai.llm_manager import LocalLLMEngine
 from app.config.settings import AnalysisConfig
 from app.core.analysis_service import analyse_file
 from app.export.csv_exporter import write_csv
@@ -67,7 +67,7 @@ class MainWindow(QWidget):
             hardware_layout.addWidget(QLabel(f"{key}: {value}"))
         tabs.addTab(hardware_widget, "하드웨어 정보")
 
-        self.settings_window = SettingsWindow(self.config)
+        self.settings_window = SettingsWindow(self.config, self.hardware)
         tabs.addTab(self.settings_window, "환경 설정")
 
         debug_widget = QWidget()
@@ -96,7 +96,7 @@ class MainWindow(QWidget):
         self.settings_window.apply()
         config = self.config
         diagnostics = Diagnostics(enabled=config.debug)
-        engine = LocalLLMEngine(config, self.hardware)
+        engine = create_ai_engine(config, self.hardware)
         results = []
         for index, path in enumerate(self.selector.files):
             self.progress.update_state(
@@ -132,6 +132,9 @@ class MainWindow(QWidget):
                     "메모리 사용량": f"{engine.memory_usage()['rss_mb']:.1f} MB",
                     "AI 실행 상태": result.ai_summary.get("status", "-"),
                     "추론 방식": result.ai_summary.get("backend", "-"),
+                    "AI 모델": result.ai_summary.get("model") or "없음",
+                    "AI 판정 수": str(result.ai_summary.get("decisions", 0)),
+                    "AI 생략/오류": result.ai_summary.get("skipped_reason") or result.ai_summary.get("error") or "-",
                 }
             )
         output_dir = Path("results")

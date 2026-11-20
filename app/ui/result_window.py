@@ -21,8 +21,11 @@ COLUMNS = [
     "분석 데이터 건수",
     "탐지 비율",
     "보호 컬럼",
+    "규칙 판정",
+    "AI 판정",
+    "규칙/AI 일치",
     "분석 방식",
-    "신뢰도",
+    "신뢰도 (규칙/AI)",
     "위험도",
     "판단 근거",
 ]
@@ -40,7 +43,7 @@ class ResultWindow(QWidget):
         self.table.setColumnCount(len(COLUMNS))
         self.table.setHorizontalHeaderLabels(COLUMNS)
         self.table.horizontalHeader().setStretchLastSection(True)
-        widths = [90, 60, 60, 90, 120, 110, 70, 90, 70, 120, 80, 90, 80, 220]
+        widths = [90, 60, 60, 90, 120, 110, 70, 90, 70, 120, 90, 90, 70, 80, 90, 80, 220]
         for index, width in enumerate(widths):
             self.table.setColumnWidth(index, width)
         self.table.cellClicked.connect(self._on_row_clicked)
@@ -50,7 +53,8 @@ class ResultWindow(QWidget):
         detail_layout = QGridLayout(self.detail)
         self.detail_labels: dict[str, QLabel] = {}
         for index, field in enumerate(
-            ["파일", "테이블", "컬럼", "유형", "탐지 건수", "탐지 비율", "보호 상태", "규칙 근거", "AI근거", "위험도"]
+            ["파일", "테이블", "컬럼", "유형", "탐지 건수", "탐지 비율", "보호 상태",
+             "규칙 판정", "AI 판정", "규칙/AI 일치", "최종 판정", "규칙 근거", "AI근거", "위험도", "추가 검토"]
         ):
             detail_layout.addWidget(QLabel(field), index, 0)
             self.detail_labels[field] = QLabel("-")
@@ -73,6 +77,9 @@ class ResultWindow(QWidget):
                 str(row.analysed_rows),
                 f"{row.ratio:.2%}",
                 ", ".join(row.protection_columns) or "-",
+                getattr(row, "rule_decision", "") or "-",
+                getattr(row, "ai_decision", "") or "-",
+                getattr(row, "agreement", "AI 미사용"),
                 row.method,
                 f"{row.rule_confidence:.2f} / {row.ai_confidence:.2f}",
                 row.risk_level,
@@ -97,12 +104,17 @@ class ResultWindow(QWidget):
             "탐지 건수": f"{result.hits} / {result.analysed_rows}행",
             "탐지 비율": f"{result.ratio:.2%}",
             "보호 상태": f"{protection} | MASK {result.mask_status} | HASH {result.hash_status}",
+            "규칙 판정": result.rule_decision or "없음",
+            "AI 판정": result.ai_decision or "없음",
+            "규칙/AI 일치": result.agreement,
+            "최종 판정": result.final_decision or result.privacy_type,
             "규칙 근거": result.rationale or "-",
             "AI근거": (
                 f"AI 신뢰도 {result.ai_confidence:.2f} (규칙 {result.rule_confidence:.2f})"
                 if result.ai_confidence else "AI 미사용/미확정"
             ),
             "위험도": result.risk_level,
+            "추가 검토": "예" if result.requires_review else "아니오",
         }
         for field, label in self.detail_labels.items():
             label.setText(values.get(field, "-"))

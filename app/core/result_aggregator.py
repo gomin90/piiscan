@@ -32,6 +32,10 @@ class ColumnResult:
     risk_score: float
     rationale: str
     requires_review: bool
+    rule_decision: str = ""
+    ai_decision: str = ""
+    agreement: str = "AI 미사용"
+    final_decision: str = ""
 
     def as_dict(self) -> dict:
         return {
@@ -58,6 +62,10 @@ class ColumnResult:
             "risk_score": self.risk_score,
             "rationale": self.rationale,
             "requires_review": self.requires_review,
+            "rule_decision": self.rule_decision,
+            "ai_decision": self.ai_decision,
+            "agreement": self.agreement,
+            "final_decision": self.final_decision,
         }
 
 
@@ -92,6 +100,27 @@ def _protection_column_names(group: dict) -> list:
     return [part.get("column") for part in group.get("columns", []) if isinstance(part, dict) and part.get("column")]
 
 
+def compare_decisions(rule_types: list[str], ai: dict | None) -> dict:
+    """규칙 판정과 AI 판정을 비교한다. 규칙 근거(체크섬 등)는 AI가 무효화하지 않는다."""
+    if not ai:
+        return {"rule_decision": ", ".join(rule_types), "ai_decision": "",
+                "agreement": "AI 미사용", "final_decision": ", ".join(rule_types)}
+    ai_decision = ai.get("privacy_type") or ""
+    if rule_types:
+        if ai_decision in rule_types:
+            agreement = "일치"
+        elif rule_types[0] == "NONE" and ai_decision == "NONE":
+            agreement = "일치"
+        else:
+            agreement = "불일치"
+        final = rule_types[0]  # 규칙 근거 우선
+    else:
+        agreement = "규칙 근거 없음"
+        final = ai_decision
+    return {"rule_decision": ", ".join(rule_types), "ai_decision": ai_decision,
+            "agreement": agreement, "final_decision": final}
+
+
 def build_results(
     file: str,
     db_type: str,
@@ -112,6 +141,7 @@ def build_results(
     results = []
     for finding in findings:
         ai = ai_judgements.get(finding["column"])
+        comparison = compare_decisions([t["type_key"] for t in finding.get("types", [])], ai)
         group = protection.get(finding["column"], {})
         assessment = assess_column(finding, group, ai, table_pii_types)
         mask_status = "확인" if group.get("mask", {}).get("verified") else ("존재(미검)" if group.get("mask") else "없음")
@@ -144,7 +174,12 @@ def build_results(
                         risk_level=assessment["level"],
                         risk_score=assessment["score"],
                         rationale=" | ".join(assessment["drivers"] + [type_info["evidence"]]),
-                        requires_review=(not type_info["confirmed"]) or bool(ai and ai.get("requires_review")),
+                        requires_review=(not type_info["confirmed"]) or bool(ai and ai.get("requires_review"))
+                                        or comparison["agreement"] == "불일치",
+                        rule_decision=comparison["rule_decision"],
+                        ai_decision=comparison["ai_decision"],
+                        agreement=comparison["agreement"],
+                        final_decision=comparison["final_decision"],
                     )
                 )
         elif ai and ai.get("privacy_type") != "NONE":
@@ -173,6 +208,10 @@ def build_results(
                     risk_score=assessment["score"],
                     rationale=" | ".join(assessment["drivers"] + [ai.get("reason", "")]),
                     requires_review=True,
+                    rule_decision=comparison["rule_decision"],
+                    ai_decision=comparison["ai_decision"],
+                    agreement=comparison["agreement"],
+                    final_decision=comparison["final_decision"],
                 )
             )
     results.sort(key=lambda row: (-row.risk_score, row.column))

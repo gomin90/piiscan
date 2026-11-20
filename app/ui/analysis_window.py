@@ -33,6 +33,9 @@ class AnalysisWindow(QWidget):
             "메모리 사용량",
             "AI 실행 상태",
             "추론 방식",
+            "AI 모델",
+            "AI 판정 수",
+            "AI 생략/오류",
         ]
         for index, field in enumerate(fields):
             grid.addWidget(QLabel(field), index, 0)

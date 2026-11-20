@@ -28,6 +28,9 @@ class AnalysisConfig:
     max_samples: int = DEFAULT_MAX_SAMPLES
     threads: int = DEFAULT_THREADS
     use_ai: bool = True
+    # AI 판정 engine: "jev" (Jev-Style Decision Model), "llm" (generative local GGUF), "auto"
+    ai_engine: str = "auto"
+    jev_model: str = "auto"  # auto | 0.8b-v3 | 2b-v4
     mode: str = "auto"  # auto | sampling | full
     schema: str = ""
     table: str = ""

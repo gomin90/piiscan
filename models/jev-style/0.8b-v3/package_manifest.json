@@ -1,0 +1,109 @@
+{
+  "repository": "chaoliangUNSW/Jev-Style-0.8B-Decision-v3-GGUF",
+  "revision": "0afb4d7b29dbcffd0ca7d3b6c37fac56430b0b99",
+  "license": "apache-2.0",
+  "model_version": "0.8B Decision v3",
+  "quantization": "Q4_K_M",
+  "scorer": "jev-score",
+  "self_contained": true,
+  "llama_cpp_ref": "b94959a64d011915d77a5381c7d4846dcda99530",
+  "packaged_at": "2026-11-20T01:41:58.621593+00:00",
+  "total_bytes": 34978240,
+  "files": [
+    {
+      "file": "jev-score",
+      "bytes": 285784,
+      "sha256": "5fd1833d0fb074adfe41ec35110f40e43c692b88cb3fe018efd7cb90a708de9d"
+    },
+    {
+      "file": "libggml-base.1.0.0.dylib",
+      "bytes": 773640,
+      "sha256": "5a142ac57253d75a017dc388e273aabef4eb83d2d6661b400c11e2498dd6d51f"
+    },
+    {
+      "file": "libggml-base.1.dylib",
+      "bytes": 773640,
+      "sha256": "5a142ac57253d75a017dc388e273aabef4eb83d2d6661b400c11e2498dd6d51f"
+    },
+    {
+      "file": "libggml-base.dylib",
+      "bytes": 773640,
+      "sha256": "5a142ac57253d75a017dc388e273aabef4eb83d2d6661b400c11e2498dd6d51f"
+    },
+    {
+      "file": "libggml-blas.1.0.0.dylib",
+      "bytes": 58776,
+      "sha256": "4b2dc425c76f3c34157ceae34066a9ee742b8e9016217792feb84adfe4c0766c"
+    },
+    {
+      "file": "libggml-blas.1.dylib",
+      "bytes": 58776,
+      "sha256": "4b2dc425c76f3c34157ceae34066a9ee742b8e9016217792feb84adfe4c0766c"
+    },
+    {
+      "file": "libggml-blas.dylib",
+      "bytes": 58776,
+      "sha256": "4b2dc425c76f3c34157ceae34066a9ee742b8e9016217792feb84adfe4c0766c"
+    },
+    {
+      "file": "libggml-cpu.1.0.0.dylib",
+      "bytes": 1009664,
+      "sha256": "0955dbaab7a79501c082455a0e53a0e7aef43c8bf1afd96bc6856bac92aa617f"
+    },
+    {
+      "file": "libggml-cpu.1.dylib",
+      "bytes": 1009664,
+      "sha256": "0955dbaab7a79501c082455a0e53a0e7aef43c8bf1afd96bc6856bac92aa617f"
+    },
+    {
+      "file": "libggml-cpu.dylib",
+      "bytes": 1009664,
+      "sha256": "0955dbaab7a79501c082455a0e53a0e7aef43c8bf1afd96bc6856bac92aa617f"
+    },
+    {
+      "file": "libggml-metal.1.0.0.dylib",
+      "bytes": 5688648,
+      "sha256": "393074715ff757a9275fc327f04aa636695d89e80afbd9d43b3b369cf7764528"
+    },
+    {
+      "file": "libggml-metal.1.dylib",
+      "bytes": 5688648,
+      "sha256": "393074715ff757a9275fc327f04aa636695d89e80afbd9d43b3b369cf7764528"
+    },
+    {
+      "file": "libggml-metal.dylib",
+      "bytes": 5688648,
+      "sha256": "393074715ff757a9275fc327f04aa636695d89e80afbd9d43b3b369cf7764528"
+    },
+    {
+      "file": "libggml.1.0.0.dylib",
+      "bytes": 60096,
+      "sha256": "7136732bc6d1e2268c141cc392359761f5fe836f1bbbaa9bbabc0207faf70b72"
+    },
+    {
+      "file": "libggml.1.dylib",
+      "bytes": 60096,
+      "sha256": "7136732bc6d1e2268c141cc392359761f5fe836f1bbbaa9bbabc0207faf70b72"
+    },
+    {
+      "file": "libggml.dylib",
+      "bytes": 60096,
+      "sha256": "7136732bc6d1e2268c141cc392359761f5fe836f1bbbaa9bbabc0207faf70b72"
+    },
+    {
+      "file": "libllama.1.0.0.dylib",
+      "bytes": 3973328,
+      "sha256": "f4b9e971b0af4648c5e22026bf5162051a870f3317c04a0d1103215537c6a0a1"
+    },
+    {
+      "file": "libllama.1.dylib",
+      "bytes": 3973328,
+      "sha256": "f4b9e971b0af4648c5e22026bf5162051a870f3317c04a0d1103215537c6a0a1"
+    },
+    {
+      "file": "libllama.dylib",
+      "bytes": 3973328,
+      "sha256": "f4b9e971b0af4648c5e22026bf5162051a870f3317c04a0d1103215537c6a0a1"
+    }
+  ]
+}

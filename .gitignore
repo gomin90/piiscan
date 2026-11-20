@@ -7,3 +7,6 @@ build/
 tests/fixtures/synthetic/
 *.gguf
 PrivacyScanner.spec
+models/jev-style/*/tokenizer/
+models/jev-style/*/*.gguf
+vendor/

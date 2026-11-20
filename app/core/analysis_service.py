@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.ai.gpu_detector import detect_hardware
-from app.ai.llm_manager import LocalLLMEngine
+from app.ai import create_ai_engine
 from app.config.settings import AnalysisConfig
 from app.core.code_group_analyzer import analyze as analyze_code_groups
 from app.core.column_stats import ColumnStats
@@ -67,7 +67,7 @@ def detect_analysis_mode(total_rows: int, requested: str) -> str:
 def analyse_file(
     path: str | Path,
     config: AnalysisConfig | None = None,
-    llm: LocalLLMEngine | None = None,
+    llm=None,
     progress: callable = None,
     diagnostics: Diagnostics | None = None,
     overrides: dict | None = None,
@@ -123,7 +123,7 @@ def analyse_file(
                                       privacy_columns={f["column"] for f in findings})
 
     # 4단계: CSV parsing resources 정리 (stats만 유지) -> 5/6단계 AI
-    llm = llm or LocalLLMEngine(config, detect_hardware())
+    llm = llm or create_ai_engine(config, detect_hardware())
     ai_summary = llm.summary()
     ai_judgements: dict[str, dict] = {}
     if llm.load():
