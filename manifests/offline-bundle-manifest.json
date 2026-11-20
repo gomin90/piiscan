@@ -1,11 +1,11 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-20T11:20:03.153200+00:00",
+  "generated_at": "2026-11-20T11:20:21.711941+00:00",
   "git": {
-    "commit": "451f2a77814224940c66f6731f6d341681c650b0",
+    "commit": "b45f32f029e48daa2892de85c6d0af2ea906d536",
     "branch": "main",
     "repository": "https://github.com/gomin90/piiscan.git",
-    "generated_at": "2026-11-20T11:20:03.189027+00:00"
+    "generated_at": "2026-11-20T11:20:21.748401+00:00"
   },
   "target": {
     "windows": {
