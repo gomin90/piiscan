@@ -152,6 +152,10 @@ class Detector:
     sensitivity: float = 0.5
     candidate_tags: frozenset[str] = frozenset()
     name_hints: tuple[str, ...] = ()
+    # Column names that positively identify the column as something else
+    # (amounts, sequences, counters). A detector must not claim a privacy type
+    # for such a column on surface form alone.
+    negative_hints: tuple[str, ...] = ()
 
     def column_affinity(self, column_name: str) -> float:
         """Return 0.0..0.8 based on how strongly the column name hints at this type."""
@@ -161,6 +165,9 @@ class Detector:
             if hint.upper() in name:
                 score += 0.35
         return min(score, 0.8)
+
+    def name_excludes(self, column_name: str) -> bool:
+        return any(hint.upper() in column_name.upper() for hint in self.negative_hints)
 
     def match(self, value: str, profile: ValueProfile, column_name: str = "") -> Match | None:
         raise NotImplementedError

@@ -33,5 +33,52 @@ generated automatically. 원본 개인정보 값은 보고서에 기록되지 �
 
 ## AI behaviour
 
+## 판정(verdict) semantics
+
+A column is declared 개인정보 only when the matching values dominate the column
+(>= 50% of non-empty values) **and** the evidence is a confirmed pattern/checksum.
+Identifier-like columns (CUST_NO, EMP_NO, ORDER_NO) whose values merely *look* like
+a passport or driver licence number are reported as **부분 매칭(검토)** with the
+matching rows so a human can confirm. This removes "사번 -> 여권번호" false positives.
+
+## Input 양식 (분석 방식 / 테이블명 / 스키마 / 원본 DB)
+
+Input is a plain CSV with a header row plus data rows (see `samples/windows_sample.csv`).
+The **환경 설정** tab exposes:
+
+| Field | Effect |
+|---|---|
+| 분석 방식 | `auto` (100행 이하 -> 샘플링 표시, 그 외 전수) / `sampling` (앞 N행만 분석) / `full` (전수) |
+| 테이블명 / 스키마 / 원본 DB | 보고서와 결과 CSV의 metadata (기본: 파일명) |
+| 행 상세 기록 | 컬럼·유형별 행 단위 evidence 최대 수 (0 = 없음) |
+
+CLI equivalents are `--mode`, `--table`, `--schema`, `--db`, `--gpu-layers`.
+
+## Row-level evidence
+
+Clicking a result row fills the **탐지 상세 (행 단위)** table: 행번호 / 컬럼 / 유형 /
+판정 / 탐지값(마스킹). The same rows are exported to
+`results/privacy_hits_<timestamp>.csv`. 원본 값은 기록되지 않습니다 (always masked).
+
+## GPU (NVIDIA CUDA)
+
+`detect_hardware()` probes the GPU with `nvidia-smi` (PowerShell WMI fallback on
+Windows) and then checks whether a ggml GPU backend library is actually installed
+next to the scorer. A visible GPU without `ggml-cuda.dll` runs on the CPU, and the
+reason is printed in the 하드웨어 정보 tab and the AI status line.
+
+For an RTX 5060 on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\diagnose.ps1
+powershell -ExecutionPolicy Bypass -File scripts\windows\install-cuda-backend.ps1
+powershell -ExecutionPolicy Bypass -File scripts\windows\build-jev-score.ps1 -GPU
+```
+
+`--gpu-layers 0` forces CPU inference. Blackwell (RTX 50xx) support depends on the
+bundled CUDA 12.4 llama.cpp build and must be verified by an actual inference run.
+
+## AI behaviour
+
 GGUF 모델이 `models/` 에 있으면 Local LLM으로 컬럼 의미를 보조 판정합니다.
 모델이 없거나 RAM이 부족하면 규칙 기반 결과만 출력되며프로그램는 정상 실행됩니다.

@@ -12,6 +12,13 @@ KOREAN_SURNAMES = {
 }
 MASKED_NAME = re.compile(r"^[가-힣]{1,2}[*＊Xx]{1,3}$|^[A-Z][A-Za-z]{0,3}[*＊Xx]{2,6}$")
 LATIN_NAME = re.compile(r"^[A-Z][a-z]{1,12}([ ,.][A-Z][a-z]{1,12}){1,3}$")
+# Organisations are not people: department/branch/organisation tokens end in a
+# fixed suffix and must never be read as a person's name.
+ORG_SUFFIXES = (
+    "팀", "부", "部", "组", "_group", "section", "dept", "department", "division",
+    "지점", "지사", "센터", "사무국", "사업부", "課", "室",
+)
+ORG_HINTS = ("DEPT", "DEPARTMENT", "ORG", "DIVISION", "TEAM", "BRANCH", "SECTION", "GROUP", "부", "팀")
 
 
 class NameDetector(Detector):
@@ -25,6 +32,11 @@ class NameDetector(Detector):
     def match(self, value: str, profile: ValueProfile, column_name: str = "") -> Match | None:
         v = value.strip()
         if not v:
+            return None
+        upper_column = column_name.upper()
+        if any(hint.upper() in upper_column for hint in ORG_HINTS):
+            return None
+        if v.endswith(ORG_SUFFIXES) or v.upper().endswith(ORG_SUFFIXES):
             return None
         if MASKED_NAME.match(v):
             return Match(self.type_key, self.display_name, 0.8, masked=True,

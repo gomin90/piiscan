@@ -19,6 +19,7 @@ from app.ai.gpu_detector import detect_hardware
 from app.config.settings import AnalysisConfig
 from app.core.analysis_service import analyse_file
 from app.export.csv_exporter import write_csv
+from app.export.hit_exporter import write_hit_rows
 from app.export.txt_exporter import write_txt
 from app.ui.analysis_window import AnalysisWindow
 from app.ui.file_selector import FileSelector
@@ -63,8 +64,20 @@ class MainWindow(QWidget):
 
         hardware_widget = QWidget()
         hardware_layout = QVBoxLayout(hardware_widget)
-        for key, value in self.hardware.as_dict().items():
-            hardware_layout.addWidget(QLabel(f"{key}: {value}"))
+        hw = self.hardware
+        gpu_line = f"GPU: {hw.gpu_vendor or '없음'} {hw.gpu_model or ''}".strip()
+        if hw.vram_total_gb:
+            gpu_line += f" (VRAM {hw.vram_total_gb:.1f}GB)"
+        gpu_line += " -> GPU 추론 가능" if hw.gpu_backend_ready else " -> CPU 추론"
+        summary = (
+            f"OS: {hw.os_name} | CPU: {hw.cpu_model} ({hw.cpu_count} cores)\n"
+            f"RAM: total {hw.total_ram_gb:.1f}GB / available {hw.available_ram_gb:.1f}GB\n"
+            f"{gpu_line}\n"
+            f"선택 backend: {hw.backend}"
+        )
+        hardware_layout.addWidget(QLabel(summary))
+        for note in hw.notes:
+            hardware_layout.addWidget(QLabel(note))
         tabs.addTab(hardware_widget, "하드웨어 정보")
 
         self.settings_window = SettingsWindow(self.config, self.hardware)
@@ -143,6 +156,7 @@ class MainWindow(QWidget):
         write_csv([r.as_dict() for result in results for r in result.results],
                   output_dir / f"privacy_results_{stamp}.csv")
         write_txt(results, output_dir / f"privacy_report_{stamp}.txt")
+        write_hit_rows(results, output_dir / f"privacy_hits_{stamp}.csv")
         self.result_window.show_results([r for result in results for r in result.results])
         self.diagnostics = diagnostics.events
         if config.debug:

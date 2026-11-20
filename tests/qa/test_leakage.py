@@ -16,6 +16,7 @@ import pytest
 
 from app.core.analysis_service import analyse_file
 from app.export.csv_exporter import write_csv
+from app.export.hit_exporter import write_hit_rows
 from app.export.txt_exporter import write_txt
 from app.utils.logger import Diagnostics
 
@@ -125,10 +126,15 @@ def test_exports_contain_no_raw_values(fixture_path: Path, tmp_path: Path):
     result = analyse_file(fixture_path)
     csv_path = write_csv([r.as_dict() for r in result.results], tmp_path / "out.csv")
     txt_path = write_txt([result], tmp_path / "out.txt")
-    text = Path(csv_path).read_text(encoding="utf-8-sig") + Path(txt_path).read_text(encoding="utf-8")
+    hits_path = write_hit_rows([result], tmp_path / "hits.csv")
+    text = (Path(csv_path).read_text(encoding="utf-8-sig")
+            + Path(txt_path).read_text(encoding="utf-8")
+            + Path(hits_path).read_text(encoding="utf-8-sig"))
     hits = scan(text)
     assert not hits, f"raw personal data in exports: {hits}"
     assert "개인정보" in text
+    # the row-level hit file must still carry evidence, just masked
+    assert "행" in Path(hits_path).read_text(encoding="utf-8-sig")
 
 
 def test_debug_diagnostics_contain_no_raw_values(fixture_path: Path, tmp_path: Path, monkeypatch):

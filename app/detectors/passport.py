@@ -17,12 +17,21 @@ class PassportDetector(Detector):
     display_name = "여권번호"
     priority = 1
     sensitivity = 0.9
-    candidate_tags = frozenset({"latin", "digits", "masked", "dot_token"})
+    candidate_tags = frozenset({"latin", "digits", "digits_sep", "alnum", "masked", "dot_token"})
     name_hints = ("여권", "PASSPORT", "PASPORT", "TRAVEL")
+    # Columns named like an internal record key are not passports just because
+    # the value happens to look like one (C1234567, E9876543).
+    negative_hints = ("CUST", "CUSTOMER", "EMP", "ORDER", "SEQ", "ACCOUNT", "PROD", "DEPT", "MEMBER")
 
     def match(self, value: str, profile: ValueProfile, column_name: str = "") -> Match | None:
         v = value.strip().upper()
         if not v or len(v) > 12:
+            return None
+        if self.name_excludes(column_name):
+            if KR_RE.match(v) or GENERIC_RE.match(v):
+                return Match(self.type_key, self.display_name, 0.45, confirmed=False,
+                             evidence=f"{column_name} 값이 여권번호 형식과 유사 (내부 ID 가능성 -> 검토 필요)",
+                             priority=self.priority, sensitivity=self.sensitivity)
             return None
         if MASKED_RE.match(v) and len(digits_only(v)) >= 3:
             return Match(self.type_key, self.display_name, 0.7, masked=True,

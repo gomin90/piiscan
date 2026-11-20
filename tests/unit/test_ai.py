@@ -18,6 +18,77 @@ def test_hardware_probe_returns_usable_report():
     assert report.total_ram_gb > 0
 
 
+def test_gpu_without_backend_library_is_reported_as_cpu(monkeypatch, tmp_path: Path):
+    """A detected NVIDIA card is useless unless the ggml CUDA library is installed."""
+    from app.ai import gpu_detector
+
+    monkeypatch.setattr(gpu_detector, "_nvidia_gpu", lambda: ("NVIDIA", "RTX 5060", 8.0, 6.0, "550.0"))
+    monkeypatch.setattr(gpu_detector, "_search_dirs", lambda binary_dir: [binary_dir])
+
+    report = gpu_detector.detect_hardware(binary_dir=tmp_path, system="Windows")
+    assert report.gpu_vendor == "NVIDIA"
+    assert report.gpu_backend_ready is False
+    assert report.backend == "cpu"
+    assert any("ggml-cuda.dll" in note for note in report.notes)
+
+    (tmp_path / "ggml-cuda.dll").write_bytes(b"fake")
+    report = gpu_detector.detect_hardware(binary_dir=tmp_path, system="Windows")
+    assert report.gpu_backend_ready is True
+    assert report.backend == "cuda"
+
+
+def test_windows_gpu_fallback_uses_wmi_when_no_nvidia_smi(monkeypatch, tmp_path: Path):
+    from app.ai import gpu_detector
+
+    monkeypatch.setattr(gpu_detector, "_nvidia_gpu", lambda: ("", "", 0.0, 0.0, ""))
+    monkeypatch.setattr(gpu_detector, "_gpu_via_powershell",
+                        lambda: ("NVIDIA", "NVIDIA GeForce RTX 5060", 8.0, 8.0, "560.00"))
+    monkeypatch.setattr(gpu_detector, "_search_dirs", lambda binary_dir: [binary_dir])
+
+    report = gpu_detector.detect_hardware(binary_dir=tmp_path, system="Windows")
+    assert report.gpu_model == "NVIDIA GeForce RTX 5060"
+    assert report.backend == "cpu"  # GPU seen, CUDA backend not installed
+    assert any("ggml-cuda.dll" in note for note in report.notes)
+
+
+def test_amd_gpu_is_reported_but_not_used(monkeypatch, tmp_path: Path):
+    from app.ai import gpu_detector
+
+    monkeypatch.setattr(gpu_detector, "_nvidia_gpu", lambda: ("", "", 0.0, 0.0, ""))
+    monkeypatch.setattr(gpu_detector, "_gpu_via_powershell",
+                        lambda: ("AMD", "Radeon RX 7800 XT", 16.0, 14.0, "24.11"))
+    monkeypatch.setattr(gpu_detector, "_search_dirs", lambda binary_dir: [binary_dir])
+
+    report = gpu_detector.detect_hardware(binary_dir=tmp_path, system="Windows")
+    assert report.gpu_vendor == "AMD"
+    assert report.backend == "cpu"
+    assert any("AMD" in note for note in report.notes)
+
+
+def test_gpu_plan_falls_back_to_cpu_when_backend_library_missing(tmp_path: Path):
+    from app.ai.gpu_detector import gpu_plan
+
+    scorer = tmp_path / "jev-score.exe"
+    scorer.write_bytes(b"")
+    hardware = HardwareReport("Windows", "Intel", 8, 16.0, 12.0, "NVIDIA", "RTX 5060", 8.0, 7.0, "550.0", "cuda")
+
+    backend, layers, note = gpu_plan(scorer, hardware, None, 2_000_000_000)
+    assert (backend, layers) == ("cpu", 0)
+    assert "ggml-cuda.dll" in note
+
+    (tmp_path / "ggml-cuda.dll").write_bytes(b"fake")
+    backend, layers, _ = gpu_plan(scorer, hardware, None, 2_000_000_000)
+    assert (backend, layers) == ("cuda", 999)
+
+    # VRAM smaller than the model -> partial offload, not a full one.
+    small = HardwareReport("Windows", "Intel", 8, 16.0, 12.0, "NVIDIA", "RTX 4060", 4.0, 3.0, "550.0", "cuda")
+    backend, layers, note = gpu_plan(scorer, small, None, 4_000_000_000)
+    assert backend == "cuda" and 0 < layers < 999
+
+    backend, layers, _ = gpu_plan(scorer, hardware, 0, 2_000_000_000)
+    assert (backend, layers) == ("cpu", 0)
+
+
 def test_no_model_means_ai_disabled_but_rules_still_run(tmp_path: Path):
     empty_dir = tmp_path / "models"
     empty_dir.mkdir()

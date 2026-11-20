@@ -14,6 +14,7 @@ import importlib.util
 import sys
 import time
 
+from app.ai.gpu_detector import gpu_plan
 from app.ai.jev.decision import (
     ADDRESS_OPTIONS,
     JEV_TYPE_TO_INTERNAL,
@@ -169,11 +170,13 @@ def build_column_state(column: dict, max_samples: int = MAX_SAMPLES) -> dict:
 
 class JevStyleAdapter:
     def __init__(self, spec: JevStyleModelSpec | None, hardware=None, threads: int = 2,
-                 rss_limit_mb: float = AI_RSS_LIMIT_MB, max_len: int | None = None) -> None:
+                 rss_limit_mb: float = AI_RSS_LIMIT_MB, max_len: int | None = None,
+                 gpu_layers: int | None = None) -> None:
         self.spec = spec
         self.hardware = hardware
         self.threads = max(1, threads)
         self.max_len = max_len
+        self.gpu_layers = gpu_layers
         self.rss_limit_mb = rss_limit_mb
         self.engine = None
         self.module = None
@@ -201,17 +204,20 @@ class JevStyleAdapter:
             self.last_error = "; ".join(self.spec.problems)
             return False
 
-        backend = "cpu"
-        gpu_layers = 0
-        if getattr(self.hardware, "backend", "cpu") == "metal":
-            backend = "metal"
-            gpu_layers = 999
+        # A GPU only helps if the matching ggml backend library sits next to the scorer.
+        backend, gpu_layers, gpu_note = gpu_plan(
+            self.spec.scorer_path, self.hardware, self.gpu_layers, self.spec.size_bytes
+        )
+        if gpu_note:
+            self.last_error = gpu_note
 
         model_gb = max(self.spec.size_bytes / (1024 ** 3), self.spec.rss_estimate_mb / 1024.0)
         available = getattr(self.hardware, "available_ram_gb", 999.0)
-        if available < model_gb + 0.5:
+        # With a GPU backend the weights live in VRAM, so system RAM only needs headroom.
+        ram_needed = 0.8 if gpu_layers > 0 else model_gb + 0.5
+        if available < ram_needed:
             self.status = (
-                f"RAM 부족 (필요 ~{model_gb + 0.5:.1f}GB, 가능 {available:.1f}GB) -> 규칙 결과만 사용"
+                f"RAM 부족 (필요 ~{ram_needed:.1f}GB, 가능 {available:.1f}GB) -> 규칙 결과만 사용"
             )
             self.last_error = "insufficient RAM for the Jev-Style model"
             return False
@@ -235,6 +241,14 @@ class JevStyleAdapter:
             )
             self.engine = engine
             self.scorer_info = dict(getattr(engine, "info", {}) or {})
+            # The scorer reports what it actually managed to offload; trust that over the plan.
+            if self.scorer_info.get("gpu_offload") is False and backend != "cpu":
+                backend = "cpu"
+                gpu_layers = 0
+                gpu_note = (
+                    f"scorer binary was built without GPU support ({self.spec.scorer_path}); "
+                    "rebuild with GGML_CUDA/-metal to use the GPU"
+                )
         except Exception as exc:  # 모델 로드/scorer 초기화 실패 -> 규칙 기반 유지
             self.status = f"Jev-Style 모델 로드 실패 -> 규칙 결과만 사용: {exc}"
             self.last_error = str(exc)
@@ -242,7 +256,10 @@ class JevStyleAdapter:
             return False
 
         self.backend = backend
-        self.status = f"로드 완료 ({self.spec.model_name}, {self.spec.quant}, {backend})"
+        self.gpu_layers = gpu_layers
+        self.status = f"로드 완료 ({self.spec.model_name}, {self.spec.quant}, {backend} backend)"
+        if gpu_note:
+            self.status += f" ({gpu_note})"
         self.load_seconds = time.perf_counter() - started
         self._sample_rss()
         return True
@@ -400,6 +417,8 @@ class JevStyleAdapter:
             "scorer": str(self.spec.scorer_path) if self.spec and self.spec.scorer_path else None,
             "status": self.status,
             "backend": self.backend,
+            "gpu_layers": getattr(self, "gpu_layers", 0),
+            "gpu_backend": getattr(self.hardware, "gpu_backend_ready", False),
             "load_seconds": round(self.load_seconds, 2),
             "inference_seconds": round(self.inference_seconds, 3),
             "decisions": self.decisions,

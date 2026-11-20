@@ -124,6 +124,26 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\fetch-cuda-backend.ps1 
 `install-cuda-backend.ps1` verifies the ZIP SHA256 before extracting `ggml-cuda.dll`
 into `runtime\windows`. Whether the GPU is then actually used must come from a real run.
 
+### Why "GPU 있음에도 CPU 추론" happens
+
+Three separate things must all be true, and the app now reports each one in the
+**하드웨어 정보** tab and in `--report-json`:
+
+1. **Detection** - `nvidia-smi` must be on PATH. If it is not, the probe falls back to
+   Windows WMI (`Get-CimInstance Win32_VideoController`), so the card is still listed.
+2. **A GPU-capable backend library must sit next to the scorer** - `gpu_backend_present()`
+   looks for `ggml-cuda.dll` (Windows) / `libggml-metal.dylib` (macOS) in the scorer
+   directory and in `runtime\windows`. The shipped bundle contains CPU-only DLLs, so a
+   GPU is *detected* but inference still runs on the CPU until step 3 is done.
+3. **The scorer binary must be built with that backend** - the prebuilt
+   `runtime\windows\jev-score*.exe` links the CPU llama.cpp build. Run
+   `build-jev-score.ps1 -GPU` on the target machine after installing the CUDA DLLs.
+
+`gpu_plan()` downgrades to CPU and writes the reason into the AI status line; VRAM
+smaller than the model produces a partial offload instead of `--ngl 999`. Use
+`--gpu-layers 0` (or `--cpu-only`) to force CPU deterministically.
+RTX 5060 is Blackwell; the bundled CUDA 12.4 asset may not support it, so measure.
+
 ## 5. 실행 및 결과 수집
 
 ```powershell

@@ -64,6 +64,9 @@ def write_txt(file_results: list, output: str | Path) -> str:
                 f"비율 {row.ratio:>6.2%} 위험도 {row.risk_level:<8} 방식 {row.method} "
                 f"근거: {row.rationale[:120]}"
             )
+            if row.hit_rows:
+                detail = ", ".join(f"행{h['row']}={h['value']}" for h in row.hit_rows[:10])
+                lines.append(f"      탐지행 {row.hits}건 중 예시: {detail}")
         review = [r for r in result.results if r.requires_review]
         if review:
             lines.append("  [추가 확인 사항]")

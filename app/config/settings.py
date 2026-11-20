@@ -26,12 +26,15 @@ class AnalysisConfig:
     context_length: int = DEFAULT_CONTEXT_LENGTH
     max_distinct_tracked: int = DEFAULT_MAX_DISTINCT_TRACKED
     max_samples: int = DEFAULT_MAX_SAMPLES
+    max_hit_rows: int = 50  # 컬럼별 행 단위 탐지 상세 retaining limit
     threads: int = DEFAULT_THREADS
     use_ai: bool = True
     # AI 판정 engine: "jev" (Jev-Style Decision Model), "llm" (generative local GGUF), "auto"
     ai_engine: str = "auto"
     jev_model: str = "auto"  # auto | 0.8b-v3 | 2b-v4
     mode: str = "auto"  # auto | sampling | full
+    sample_rows: int = 1000  # mode=sampling일 실제 분석 행 수
+    gpu_layers: int | None = None  # None = auto (999 when a GPU backend is installed, 0 otherwise)
     schema: str = ""
     table: str = ""
     db_type: str = ""

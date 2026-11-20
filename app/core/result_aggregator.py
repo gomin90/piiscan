@@ -1,7 +1,7 @@
 """규칙 결과 + AI 결과 + 보호 분석을 하나의 결과 행(rows)으로 통합."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.core.risk_engine import assess_column
@@ -36,6 +36,8 @@ class ColumnResult:
     ai_decision: str = ""
     agreement: str = "AI 미사용"
     final_decision: str = ""
+    verdict: str = "개인정보"
+    hit_rows: list = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
@@ -66,6 +68,11 @@ class ColumnResult:
             "ai_decision": self.ai_decision,
             "agreement": self.agreement,
             "final_decision": self.final_decision,
+            "verdict": self.verdict,
+            "hit_rows": self.hit_rows,
+            "hit_rows_text": "; ".join(
+                f"행{row['row']}: {row['value']}" for row in self.hit_rows[:10]
+            ),
         }
 
 
@@ -180,9 +187,48 @@ def build_results(
                         ai_decision=comparison["ai_decision"],
                         agreement=comparison["agreement"],
                         final_decision=comparison["final_decision"],
+                        verdict=type_info.get("decision", "개인정보"),
+                        hit_rows=type_info.get("hit_rows", []),
                     )
                 )
-        elif ai and ai.get("privacy_type") != "NONE":
+        for type_info in finding.get("weak_types", []):
+            results.append(
+                ColumnResult(
+                    analysed_at=now,
+                    file=file,
+                    db_type=db_type,
+                    schema=schema,
+                    table=table,
+                    mode=mode,
+                    rows_analysed=rows_analysed,
+                    column=finding["column"],
+                    privacy_type=type_info["type_key"],
+                    display_name=type_info["display_name"],
+                    hits=type_info["hits"],
+                    analysed_rows=finding["non_empty"],
+                    ratio=round(type_info["ratio"], 4),
+                    protection_columns=protection_names,
+                    mask_status=mask_status,
+                    hash_status=hash_status,
+                    method="규칙(부분 매칭)",
+                    rule_confidence=type_info["rule_confidence"],
+                    ai_confidence=ai.get("confidence", 0.0) if ai else 0.0,
+                    risk_level="확인 필요",
+                    risk_score=0.0,
+                    rationale=(
+                        f"{finding['column']} 열 {finding['non_empty']}행 중 {type_info['hits']}행({type_info['ratio']:.0%}) "
+                        f"만 {type_info['display_name']} 형식과 일치 (컬럼명근거 없음) | {type_info['evidence']}"
+                    ),
+                    requires_review=True,
+                    rule_decision="부분 매칭(검토)",
+                    ai_decision=comparison["ai_decision"],
+                    agreement=comparison["agreement"],
+                    final_decision="부분 매칭(검토)",
+                    verdict="부분 매칭(검토)",
+                    hit_rows=type_info.get("hit_rows", []),
+                )
+            )
+        if not finding["types"] and not finding.get("weak_types") and ai and ai.get("privacy_type") != "NONE":
             results.append(
                 ColumnResult(
                     analysed_at=now,

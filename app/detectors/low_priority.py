@@ -106,9 +106,14 @@ class PostcodeDetector(Detector):
     sensitivity = 0.3
     candidate_tags = frozenset({"digits", "digits_sep", "latin"})
     name_hints = ("POST", "ZIP", "우편", "PCODE")
+    negative_hints = ("AMOUNT", "PRICE", "TOTAL", "QTY", "COUNT", "SEQ", "IDX", "BALANCE", "SUM", "金额")
 
     def match(self, value: str, profile: ValueProfile, column_name: str = "") -> Match | None:
         v = value.strip()
+        if self.name_excludes(column_name):
+            # A numeric amount/counter column is not a postcode column, however
+            # five digits long its values happen to be.
+            return None
         if POSTCODE_KR.fullmatch(v):
             return Match(self.type_key, self.display_name, 0.8,
                         evidence="우편번호 형식", priority=self.priority, sensitivity=self.sensitivity)

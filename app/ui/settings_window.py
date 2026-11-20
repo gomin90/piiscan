@@ -1,4 +1,7 @@
-"""환경 설정 및 AI 판정 engine 상태 pane."""
+"""환경 설정 및 AI 판정 engine 상태 pane.
+
+CLI의 --mode/--table/--schema/--db 옵션이 GUI에도 그대로 노출된다 (양식).
+"""
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
@@ -6,6 +9,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QLabel,
+    QLineEdit,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -21,12 +25,24 @@ class SettingsWindow(QWidget):
         self.config = config
         layout = QVBoxLayout(self)
         form = QFormLayout()
+        self.mode_box = QComboBox()
+        self.mode_box.addItems(["auto", "sampling", "full"])
+        self.mode_box.setCurrentText(config.mode)
+        self.table_box = QLineEdit(config.table)
+        self.table_box.setPlaceholderText("예: 고객테이블 (비워두면 파일명)")
+        self.schema_box = QLineEdit(config.schema)
+        self.schema_box.setPlaceholderText("예: PROD")
+        self.db_box = QLineEdit(config.db_type)
+        self.db_box.setPlaceholderText("예: Oracle, MySQL, MSSQL")
         self.batch_box = QSpinBox()
         self.batch_box.setRange(100, 10000)
         self.batch_box.setValue(config.batch_size)
         self.context_box = QSpinBox()
         self.context_box.setRange(512, 8192)
         self.context_box.setValue(config.context_length)
+        self.hit_rows_box = QSpinBox()
+        self.hit_rows_box.setRange(0, 500)
+        self.hit_rows_box.setValue(config.max_hit_rows)
         self.thread_box = QSpinBox()
         self.thread_box.setRange(1, 8)
         self.thread_box.setValue(config.threads)
@@ -40,8 +56,13 @@ class SettingsWindow(QWidget):
         self.model_box.setCurrentText(config.jev_model)
         self.debug_check = QCheckBox("디버그 진단 로그")
         self.debug_check.setChecked(config.debug)
+        form.addRow("분석 방식", self.mode_box)
+        form.addRow("테이블명", self.table_box)
+        form.addRow("스키마", self.schema_box)
+        form.addRow("원본 DB", self.db_box)
         form.addRow("배치 크기 (행)", self.batch_box)
         form.addRow("Context length", self.context_box)
+        form.addRow("행 상세 기록 (0 = 없음)", self.hit_rows_box)
         form.addRow("CPU 스레드", self.thread_box)
         form.addRow("AI", self.ai_check)
         form.addRow("AI engine", self.engine_box)
@@ -68,11 +89,22 @@ class SettingsWindow(QWidget):
             lines.append(f"  {spec.model_name} ({spec.quant}, {spec.size_bytes / (1024 ** 3):.2f}GB, {scorer}) - {state}")
         if hardware is not None:
             lines.append(f"  사용 가능한 RAM: {hardware.available_ram_gb:.1f}GB / backend: {hardware.backend}")
+            if hardware.gpu_model:
+                gpu_line = f"  GPU: {hardware.gpu_vendor} {hardware.gpu_model} (VRAM {hardware.vram_total_gb:.1f}GB)"
+                gpu_line += " -> GPU 추론 가능" if hardware.gpu_backend_ready else " -> GPU backend DLL 없음, CPU 추론"
+                lines.append(gpu_line)
+            for note in hardware.notes:
+                lines.append(f"  {note}")
         self.ai_status.setText("\n".join(lines))
 
     def apply(self) -> AnalysisConfig:
+        self.config.mode = self.mode_box.currentText()
+        self.config.table = self.table_box.text().strip()
+        self.config.schema = self.schema_box.text().strip()
+        self.config.db_type = self.db_box.text().strip()
         self.config.batch_size = self.batch_box.value()
         self.config.context_length = self.context_box.value()
+        self.config.max_hit_rows = self.hit_rows_box.value()
         self.config.threads = self.thread_box.value()
         self.config.use_ai = self.ai_check.isChecked()
         self.config.ai_engine = self.engine_box.currentText()

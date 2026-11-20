@@ -17,6 +17,7 @@ COLUMNS = [
     "테이블명",
     "컬럼명",
     "개인정보 유형",
+    "판정",
     "탐지 건수",
     "분석 데이터 건수",
     "탐지 비율",
@@ -43,7 +44,7 @@ class ResultWindow(QWidget):
         self.table.setColumnCount(len(COLUMNS))
         self.table.setHorizontalHeaderLabels(COLUMNS)
         self.table.horizontalHeader().setStretchLastSection(True)
-        widths = [90, 60, 60, 90, 120, 110, 70, 90, 70, 120, 90, 90, 70, 80, 90, 80, 220]
+        widths = [90, 60, 60, 90, 120, 110, 100, 70, 90, 70, 120, 90, 90, 70, 80, 90, 80, 220]
         for index, width in enumerate(widths):
             self.table.setColumnWidth(index, width)
         self.table.cellClicked.connect(self._on_row_clicked)
@@ -61,6 +62,25 @@ class ResultWindow(QWidget):
             detail_layout.addWidget(self.detail_labels[field], index, 1)
         layout.addWidget(self.detail)
 
+        # Row-level evidence: exactly which source rows matched.
+        layout.addWidget(QLabel("탐지 상세 (행 단위, 값은 마스킹됨)"))
+        self.hit_table = QTableWidget()
+        self.hit_table.setColumnCount(5)
+        self.hit_table.setHorizontalHeaderLabels(["행번호", "컬럼", "유형", "판정", "탐지값(마스킹)"])
+        for index, width in enumerate([70, 120, 110, 110, 160]):
+            self.hit_table.setColumnWidth(index, width)
+        layout.addWidget(self.hit_table)
+
+    def show_hits(self, result) -> None:
+        rows = result.hit_rows if hasattr(result, "hit_rows") else []
+        self.hit_table.setRowCount(len(rows))
+        for index, hit in enumerate(rows):
+            self.hit_table.setItem(index, 0, QTableWidgetItem(str(hit["row"])))
+            self.hit_table.setItem(index, 1, QTableWidgetItem(result.column))
+            self.hit_table.setItem(index, 2, QTableWidgetItem(result.display_name))
+            self.hit_table.setItem(index, 3, QTableWidgetItem(getattr(result, "verdict", "개인정보")))
+            self.hit_table.setItem(index, 4, QTableWidgetItem(hit["value"]))
+
     def show_results(self, results: list) -> None:
         rows = sorted(results, key=lambda r: (RISK_ORDER.get(r.risk_level, 9), -r.hits))
         self.rows = rows
@@ -73,6 +93,7 @@ class ResultWindow(QWidget):
                 row.table,
                 row.column,
                 row.display_name,
+                getattr(row, "verdict", "개인정보"),
                 str(row.hits),
                 str(row.analysed_rows),
                 f"{row.ratio:.2%}",
@@ -95,6 +116,7 @@ class ResultWindow(QWidget):
             self.show_detail(self.rows[row])
 
     def show_detail(self, result) -> None:
+        self.show_hits(result)
         protection = ", ".join(result.protection_columns) or "없음"
         values = {
             "파일": result.file,

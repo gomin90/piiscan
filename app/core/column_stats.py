@@ -17,6 +17,7 @@ class Hit:
     display_name: str
     count: int = 0
     masked_count: int = 0
+    confirmed_count: int = 0
     confidence_sum: float = 0.0
     max_confidence: float = 0.0
     evidence: str = ""
@@ -46,6 +47,10 @@ class ColumnStats:
     distinct: BoundedSet = field(default_factory=lambda: BoundedSet(limit=2000))
     hits: dict[str, Hit] = field(default_factory=dict)
     samples: list[str] = field(default_factory=list)
+    # Per-type list of the rows that actually matched, so the report can show
+    # *which rows* were caught instead of only a column-level count.
+    hit_rows: dict[str, list[dict]] = field(default_factory=dict)
+    max_hit_rows: int = 50
     min_numeric: float | None = None
     max_numeric: float | None = None
 
@@ -83,20 +88,31 @@ class ColumnStats:
         if len(self.samples) < 6:
             self.samples.append(mask_value(stripped))
 
-    def add_hit(self, match) -> None:
+    def add_hit(self, match, row_number: int = 0, masked_value: str = "") -> None:
         hit = self.hits.get(match.type_key)
         if hit is None:
-            hit = Hit(match.type_key, match.display_name, 0, 0, 0.0, 0.0, match.evidence,
-                     match.confirmed, match.sensitivity, match.priority)
+            hit = Hit(
+                type_key=match.type_key,
+                display_name=match.display_name,
+                evidence=match.evidence,
+                confirmed=match.confirmed,
+                sensitivity=match.sensitivity,
+                priority=match.priority,
+            )
             self.hits[match.type_key] = hit
         hit.count += 1
         if match.masked:
             hit.masked_count += 1
+        if match.confirmed:
+            hit.confirmed_count += 1
         hit.confidence_sum += match.confidence
         hit.max_confidence = max(hit.max_confidence, match.confidence)
         hit.confirmed = hit.confirmed and match.confirmed
         if not hit.evidence:
             hit.evidence = match.evidence
+        rows = self.hit_rows.setdefault(match.type_key, [])
+        if len(rows) < self.max_hit_rows:
+            rows.append({"row": row_number, "value": masked_value, "confidence": round(match.confidence, 3)})
 
     def detection_ratio(self, type_key: str) -> float:
         hit = self.hits.get(type_key)

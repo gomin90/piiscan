@@ -1,11 +1,11 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-20T09:08:18.563206+00:00",
+  "generated_at": "2026-11-20T10:10:28.171305+00:00",
   "git": {
-    "commit": "aac20853f48e6067f4835f0999e2095b96c283b5",
+    "commit": "51d2b90a7cca62544ecbca85067ea8e9ebfa646e",
     "branch": "main",
     "repository": "https://github.com/gomin90/piiscan.git",
-    "generated_at": "2026-11-20T09:08:18.598463+00:00"
+    "generated_at": "2026-11-20T10:10:28.205909+00:00"
   },
   "target": {
     "windows": {
@@ -32,9 +32,9 @@
       "scorer": "jev_score_v2.cpp"
     }
   },
-  "file_count": 216,
-  "total_bytes": 2422981715,
-  "total_mb": 2310.7,
+  "file_count": 218,
+  "total_bytes": 2423018220,
+  "total_mb": 2310.8,
   "files": [
     {
       "path": ".gitattributes",
@@ -80,8 +80,8 @@
     },
     {
       "path": "app/ai/gpu_detector.py",
-      "size": 3920,
-      "sha256": "2c15dd9f77607d59c28bceef558d1a068ddf3df3852813e712589dea69ca4e61",
+      "size": 10254,
+      "sha256": "ee1b53e3bf5242e9d93a8bbd9fa940f1bde8d30a40f1cb212bb48562eb34e6ce",
       "category": "app"
     },
     {
@@ -92,8 +92,8 @@
     },
     {
       "path": "app/ai/jev/adapter.py",
-      "size": 18749,
-      "sha256": "4c0a37ba8c2ef87dc1f343950ccbdef41cea17b254d2c30af6be1db10ac26277",
+      "size": 19844,
+      "sha256": "26a20ca307b50adf92cad44012e8672b9ee2d03ecfd0d09849aa6ec210db910e",
       "category": "app"
     },
     {
@@ -104,8 +104,8 @@
     },
     {
       "path": "app/ai/jev/engine.py",
-      "size": 7601,
-      "sha256": "338e9d0fd3dda528f95de9872ca96bc6ec4731f6734ab32fa9af7d5abd7fc380",
+      "size": 7670,
+      "sha256": "36842112b05ffc7f70abca193079257c3057cb3f7506cc419505e9f85e446a48",
       "category": "app"
     },
     {
@@ -146,8 +146,8 @@
     },
     {
       "path": "app/config/settings.py",
-      "size": 1881,
-      "sha256": "84b4605360c843415fd01b489392db7baf38c4b673724873eef977691c6c153b",
+      "size": 2132,
+      "sha256": "91403bcc42db54a985f0b4d8a86706b2886de2a964fdf1bc1457d7f0a780c635",
       "category": "app"
     },
     {
@@ -158,8 +158,8 @@
     },
     {
       "path": "app/core/analysis_service.py",
-      "size": 7253,
-      "sha256": "a7b29f8ca35a3272054d64892e6e4d99646ae58d4c6b2499dde1f8d3242a1085",
+      "size": 8186,
+      "sha256": "366af5059ebb2f5b5bc693854785c1f6898139e1a2fca0f3087c84ba74d9e77f",
       "category": "app"
     },
     {
@@ -170,8 +170,8 @@
     },
     {
       "path": "app/core/column_stats.py",
-      "size": 4367,
-      "sha256": "ff642e50f5a47d31dc19234fe9ecdcad3da6176987b156a75d0e58810ecdec79",
+      "size": 5094,
+      "sha256": "3d6616066969b5fcae6b1fc1a9a4fd89f9ce7413dc28aa7e20536f431818fa64",
       "category": "app"
     },
     {
@@ -194,14 +194,14 @@
     },
     {
       "path": "app/core/privacy_engine.py",
-      "size": 6640,
-      "sha256": "46cbb31960871bf68d2d325346a4fb6784c1b2b0dcfaa19d7db4a31eac495ae3",
+      "size": 9635,
+      "sha256": "fc940e236b05ce6fbd0820964c9b4d563b771d85628dd6d375770013e6fa0d79",
       "category": "app"
     },
     {
       "path": "app/core/result_aggregator.py",
-      "size": 8702,
-      "sha256": "d45be919bd02916cd48b25c285c6187146d44186f75141c1d168f9f975cf5b9b",
+      "size": 11043,
+      "sha256": "6651c27a53344b8699395ad3d5dcbe83e2806fbe8d9dafbd77f12cc98fb93221",
       "category": "app"
     },
     {
@@ -230,8 +230,8 @@
     },
     {
       "path": "app/detectors/base.py",
-      "size": 5202,
-      "sha256": "13e12a33c6531269db080cd0fe69efe77dbaefd991a8de85161d5df1a2635f0e",
+      "size": 5586,
+      "sha256": "9ddc1fc87f07b1960b4ded8f1676d4b7aceb908988aa13711b30321963d05bfa",
       "category": "app"
     },
     {
@@ -302,20 +302,20 @@
     },
     {
       "path": "app/detectors/low_priority.py",
-      "size": 5103,
-      "sha256": "4d385540f19f90d4e91d50b0fdb9c8642c3a9b280023e179608457f6c9d50b9d",
+      "size": 5415,
+      "sha256": "ca7fac4829dac95a8c77803a90be17b8da0b21d4127b1a0da3a55c0e2cfb35ad",
       "category": "app"
     },
     {
       "path": "app/detectors/name.py",
-      "size": 2096,
-      "sha256": "f02b8e23dc8b7cc57bf302ee611c02ef26729e25c31b44a9b67be1251c7067ac",
+      "size": 2751,
+      "sha256": "aaedfc21216e8881504bac490a830fb1c206d2a2e6e15ccb99f7d17ab23a6955",
       "category": "app"
     },
     {
       "path": "app/detectors/passport.py",
-      "size": 1806,
-      "sha256": "facc1ccd8ffb5fc4bb0014e96be2f08b8c96d532008054d6db2ffb81a677f2a9",
+      "size": 2496,
+      "sha256": "059cb382fbee32bbfd752ccb5d7eb3cdcec8267b1139855339e8e766f5665802",
       "category": "app"
     },
     {
@@ -344,20 +344,26 @@
     },
     {
       "path": "app/export/csv_exporter.py",
-      "size": 1880,
-      "sha256": "635c22e3d529f4b181a029761e3a4adcd33849121f1934585b513694adf1172a",
+      "size": 2017,
+      "sha256": "4ae13ed305e9f2c84443b7a820b5556b121d59b3eeb6651a679dfb8220f712d6",
+      "category": "app"
+    },
+    {
+      "path": "app/export/hit_exporter.py",
+      "size": 3025,
+      "sha256": "336e2e1fe4d84e64572a7432c03c70c828013cf3f21c82d7297faa125295713d",
       "category": "app"
     },
     {
       "path": "app/export/txt_exporter.py",
-      "size": 4170,
-      "sha256": "8d8483cfa6d79b574d4cdd43f05a4e5821c4fb62ec361862f0c5f5ddc5a366f7",
+      "size": 4376,
+      "sha256": "29dc79320b4959867cbe23f0dc2a84080ef88bf6b8c82397960021f69537f8fb",
       "category": "app"
     },
     {
       "path": "app/main.py",
-      "size": 6225,
-      "sha256": "cd993cd39a79142c20acff1665192a800200f72e67de8f49f0b707118a2ea530",
+      "size": 6637,
+      "sha256": "20f240edeb55d0ea5f0c1f10c66cb16c9f4ef1c0049c2f6fa0d6d96a61d6d698",
       "category": "app"
     },
     {
@@ -380,8 +386,8 @@
     },
     {
       "path": "app/ui/main_window.py",
-      "size": 7329,
-      "sha256": "3bddd5b859013d4314931ade3f50b427f33d7c93f7d03d28fe546469abcc2a7a",
+      "size": 8026,
+      "sha256": "1372de20d710292700f5da722f6760caefe5c823d9cc3876eb24b3407bd541c3",
       "category": "app"
     },
     {
@@ -392,14 +398,14 @@
     },
     {
       "path": "app/ui/result_window.py",
-      "size": 4760,
-      "sha256": "fdc2a810d88bc2b9ada2cf998990cefaace3b4811700f2ca78ec9ee18ae454bb",
+      "size": 6005,
+      "sha256": "de1e5080dd0d1ab0ae157d0f98e1898add7a86c873e239948ec458da811d6d44",
       "category": "app"
     },
     {
       "path": "app/ui/settings_window.py",
-      "size": 3529,
-      "sha256": "38ba3bb0123f030b3070602f41cd003f66dcadad4b6c4929e7d5324651aaaa71",
+      "size": 5249,
+      "sha256": "23c14e2b74a934f09516fcf92a61b014791049358b47f47f4bfe55269d32816d",
       "category": "app"
     },
     {
@@ -464,20 +470,20 @@
     },
     {
       "path": "docs/qa-verification-report.md",
-      "size": 15164,
-      "sha256": "530578be950131ebf5eeff4941fa46f484903faf40a49a1f7fe219bd27f21ba0",
+      "size": 17050,
+      "sha256": "a13fe8b9b16c0deae3a0ff603842365f16fba96984d04491e5c3bbe2215cec48",
       "category": "docs"
     },
     {
       "path": "docs/user-guide.md",
-      "size": 1329,
-      "sha256": "06f3f4cb4140e14abf2f3b7bcdf514d1e43c921013ebdc8381f039ca9f93da96",
+      "size": 3503,
+      "sha256": "f5c05f6336d1c63baac6011d675d79cb81ff3283ee5d2e3ba81700631faf3ed5",
       "category": "docs"
     },
     {
       "path": "docs/windows-test-guide.md",
-      "size": 9105,
-      "sha256": "3ce930d915561ef2e969fd043d172468a29a3dd585f29529da8bd8383805e392",
+      "size": 10341,
+      "sha256": "1c8ce75d23b8a1b7aaee91d4975833abe358d61fff3d4d57ebc70048d1ca27ac",
       "category": "docs"
     },
     {
@@ -944,8 +950,8 @@
     },
     {
       "path": "tests/qa/test_leakage.py",
-      "size": 7875,
-      "sha256": "2665b5a3921497f91915a15793eba7066b3ba649fbc822e8ca1f02deaa3d0923",
+      "size": 8202,
+      "sha256": "3056ed51deddfc961f440ca4f4482656dec49943bd527a16aa016c9f9bcc02b3",
       "category": "other"
     },
     {
@@ -955,9 +961,15 @@
       "category": "other"
     },
     {
+      "path": "tests/qa/test_row_detail.py",
+      "size": 3340,
+      "sha256": "e0dfc5c01b81e29670d57b4b763fdbda394efa5b98bed6f527fa0eae0a39a57d",
+      "category": "other"
+    },
+    {
       "path": "tests/unit/test_ai.py",
-      "size": 3405,
-      "sha256": "cb4d1a3d49917f94e3c774bd74220d9334bbbd2ae9bca5c9e74c506f3405d928",
+      "size": 6719,
+      "sha256": "bb6b0486f3c7f43f1a047790f0657243dbe24486d46257bafe130e0c825ca162",
       "category": "other"
     },
     {

@@ -22,6 +22,7 @@ from app.ai.gpu_detector import detect_hardware
 from app.config.settings import AnalysisConfig
 from app.core.analysis_service import analyse_file
 from app.export.csv_exporter import write_csv
+from app.export.hit_exporter import write_hit_rows
 from app.export.txt_exporter import write_txt
 from app.utils.logger import Diagnostics, get_logger
 
@@ -45,6 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="AI 엔진: auto(로컬 Jev-Style 우선), jev, llm")
     parser.add_argument("--jev-model", default="auto", help="Jev-Style 모델 key (0.8b-v3, 2b-v4)")
     parser.add_argument("--cpu-only", action="store_true", help="Metal/GPU 없이 CPU로 AI 추론")
+    parser.add_argument("--gpu-layers", dest="gpu_layers", type=int, default=None,
+                        help="GPU로 offload할 layer 수 (0 = CPU). 기본: GPU backend 설치 시 999")
     parser.add_argument("--debug", action="store_true", help="진단 로그 출력")
     parser.add_argument("--json", action="store_true", help="JSON 요약 stdout")
     parser.add_argument("--report-json", help="실행/진단 결과를 JSON 파일로 저장 (원문 개인정보 없음)")
@@ -71,6 +74,7 @@ def run_cli(args) -> int:
     config.use_ai = not args.no_ai
     config.ai_engine = args.ai_engine
     config.jev_model = args.jev_model
+    config.gpu_layers = args.gpu_layers
     config.debug = args.debug
 
     logger = get_logger()
@@ -78,6 +82,7 @@ def run_cli(args) -> int:
     hardware = detect_hardware()
     if args.cpu_only:
         hardware.backend = "cpu"
+        config.gpu_layers = 0
     logger.info("하드웨어: %s", hardware.as_dict())
 
     files = collect_files(args)
@@ -110,7 +115,8 @@ def run_cli(args) -> int:
     flat_results = [row for result in results for row in result.results]
     csv_path = write_csv(flat_results, output_dir / f"privacy_results_{timestamp}.csv")
     txt_path = write_txt(results, output_dir / f"privacy_report_{timestamp}.txt")
-    logger.info("결과: %s / %s", csv_path, txt_path)
+    hits_path = write_hit_rows(results, output_dir / f"privacy_hits_{timestamp}.csv")
+    logger.info("결과: %s / %s / %s", csv_path, txt_path, hits_path)
 
     report = {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

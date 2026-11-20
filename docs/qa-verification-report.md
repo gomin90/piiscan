@@ -90,6 +90,41 @@ PySide6 6.12.0, psutil 7.2.2, PyInstaller 6.22.3, pytest 9.2.0, **llama-cpp-pyth
 | UUID | 1.000 | 1.000 | 1.000 | 0 | 0 | 1.000 | 1.000 | 1.000 | 0 | 0 |
 | **합계** | **0.596** | **0.929** | **0.726** | **44** | **5** | **0.930** | **0.943** | **0.936** | **5** | **4** |
 
+### Column-dominance gating (2026-11-20 fix)
+
+Business tables exposed a systematic false positive class: a column whose *name* is
+unrelated to a privacy type but whose *values* occasionally match a pattern
+(`DEPT` containing "support", `AMOUNT` with 6-digit values) was reported as
+NAME / POSTCODE. Two rules now decide a claim:
+
+| 판정 | condition |
+|---|---|
+| `개인정보` | matched rows >= 50% of non-empty **and** confirmed (checksum/strict pattern) evidence ratio >= 50%, or the column name hints at the type and ratio >= 30% with confirmed evidence |
+| `부분 매칭(검토)` | otherwise - the type is listed with the matched rows so a human can decide |
+
+Before/after on a synthetic business table (`DEPT`, `AMOUNT`, `CUST_NO` mixed with real
+email/name/address columns):
+
+| column | before | after |
+|---|---|---|
+| DEPT | NAME detected (ratio 0.167) | nothing |
+| AMOUNT | POSTCODE detected (ratio 0.43) | nothing |
+| CUST_NO / EMP_NO | PASSPORT flagged | PASSPORT flagged as 부분 매칭(검토) with the 4 matching rows |
+
+Root cause also fixed: `ValueProfile` tags letter+digit values as `alnum` only, and
+`PassportDetector` / `DriverLicenseDetector` / `ForeignerIdDetector` did not list
+`alnum` in `candidate_tags`, so those detectors were **never invoked** inside the
+pipeline (detector-level tests called `match()` directly, which is why the QA suite
+did not catch it). Their candidate_tags now include `alnum` / `digits_sep`.
+
+### Row-level evidence
+
+Every rule hit records `(행번호, 마스킹된 값, 신뢰도)`. It is surfaced in the GUI
+result detail, printed in the TXT report, appended to the results CSV as
+`탐지행(예, 마스킹)`, and exported as `results/privacy_hits_<timestamp>.csv`
+(one line per hit: 파일/컬럼/유형/판정/행번호/탐지값(마스킹)/... values are always
+passed through `mask_value`, verified by the leakage tests).
+
 ### 남은 false positive (5)
 
 | 값 | 오 탐지 유형 | 원인 |

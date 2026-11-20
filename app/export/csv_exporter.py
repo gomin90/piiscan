@@ -6,9 +6,9 @@ from pathlib import Path
 
 HEADERS = [
     "분석일시", "파일명", "원본DB", "스키마", "테이블명", "분석방식", "분석행수",
-    "컬럼명", "개인정보유형", "탐지건수", "탐지비율", "암호화관련컬럼",
-    "마스킹상태", "해시상태", "규칙판정", "AI판정", "판정일치", "최종판정",
-    "규칙신뢰도", "AI신뢰도", "위험도", "판단근거", "추가확인",
+    "컬럼명", "개인정보유형", "판정", "탐지건수", "탐지비율", "탐지행(예, 마스킹)",
+    "암호화관련컬럼", "마스킹상태", "해시상태", "규칙판정", "AI판정", "판정일치",
+    "최종판정", "규칙신뢰도", "AI신뢰도", "위험도", "판단근거", "추가확인",
 ]
 
 
@@ -30,8 +30,10 @@ def write_csv(results: list, output: str | Path) -> str:
                 row["rows_analysed"],
                 row["column"],
                 row["display_name"],
+                row.get("verdict", "개인정보"),
                 row["hits"],
                 row["ratio"],
+                row.get("hit_rows_text", ""),
                 row["protection_columns"],
                 row["mask_status"],
                 row["hash_status"],

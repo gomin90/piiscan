@@ -65,7 +65,8 @@ class JevStyleEngine:
             self.fallback_used = True
             return False
 
-        adapter = JevStyleAdapter(self.spec, self.hardware, threads=self.config.threads)
+        adapter = JevStyleAdapter(self.spec, self.hardware, threads=self.config.threads,
+                                  gpu_layers=self.config.gpu_layers)
         if not adapter.load():
             self.status = adapter.status
             self.skipped_reason = adapter.last_error

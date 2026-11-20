@@ -57,9 +57,12 @@ class FileResult:
         }
 
 
-def detect_analysis_mode(total_rows: int, requested: str) -> str:
-    if requested in ("sampling", "full"):
-        return requested
+def detect_analysis_mode(total_rows: int, requested: str, sample_rows: int = 1000) -> str:
+    if requested == "full":
+        return "전수"
+    if requested == "sampling":
+        # 실데이터 전량 대신 앞 N행만 분석한다 (report에 분석 행 수 함께 기록).
+        return f"샘플링({min(sample_rows, total_rows or sample_rows)}행)"
     # 최근 100개 추출 CSV는 샘플링, 그 외 파일은 전수 분석으로 표시한다.
     return "sampling(최근 100개)" if total_rows <= 100 else "전수"
 
@@ -80,22 +83,34 @@ def analyse_file(
 
     # 1단계: 파일 형식 검사
     profile = detect_format(path)
-    settings = FileSettings.from_profile(profile, **(overrides or {}))
+    overrides = dict(overrides or {})
+    overrides.setdefault("table", config.table)
+    overrides.setdefault("schema", config.schema)
+    overrides.setdefault("db_type", config.db_type)
+    settings = FileSettings.from_profile(profile, **overrides)
     diagnostics.record("format_detected", encoding=settings.encoding, delimiter=repr(settings.delimiter),
                        header=settings.has_header, columns=profile.column_count)
 
     loader = CsvLoader(settings)
     loader.prepare()
-    mode = detect_analysis_mode(loader.total_rows or 0, config.mode)
+    mode = detect_analysis_mode(loader.total_rows or 0, config.mode, config.sample_rows)
+    # "sampling" genuinely truncates the scan; "full"/"auto" stream every row.
+    row_limit = config.sample_rows if config.mode == "sampling" else None
+    diagnostics.record("analysis_mode", mode=mode, row_limit=row_limit)
 
     # 2단계: 스트리밍 규칙 기반 전수 분석 (batch 1,000행)
     engine = PrivacyEngine(config)
-    stats = [ColumnStats(name=name, index=i) for i, name in enumerate(loader.column_names)]
+    stats = [ColumnStats(name=name, index=i, max_hit_rows=config.max_hit_rows)
+             for i, name in enumerate(loader.column_names)]
     batch: list[list[str]] = []
     code_sample: list[list[str]] = []
     last_progress = 0.0
     batch_seconds = 0.0
     for index, row in loader.iter_rows():
+        if row_limit is not None and engine.rows_analysed >= row_limit:
+            diagnostics.record("sampling_cutoff", rows_analysed=engine.rows_analysed,
+                               total_rows=loader.total_rows)
+            break
         batch.append(row)
         if len(code_sample) < 500:
             code_sample.append(row)
