@@ -170,10 +170,10 @@ AI adds ≈4.2 s because it runs **per column**, not per row.
 | 2B v4 | Metal | 2.31–2.41 GB | 509–616 MB | 1.787 GB |
 | 2B v4 | CPU | 3.69–3.79 GB | 669–775 MB | 2.990 GB |
 
-Frozen binary (`dist/PrivacyScanner`) run: peak RSS across the process tree
-1,661 MB (0.8B) and the JSON-reported `peak_rss_mb` 1,659.8 / 1,899.5 MB for
-0.8B / 2B respectively. VRAM: Apple Silicon Metal usage is inside the unified
-memory measured above; no discrete VRAM counter on this machine.
+Frozen binary (`dist/PrivacyScanner`) runs: reported `peak_rss_mb` 1,488 MB (0.8B)
+and 2,104 MB (2B); an independent `ps`-based sampling of the whole onefile process
+tree during a 130k-row run gave 2,147 MB total peak. VRAM: Apple Silicon Metal usage
+is inside the unified memory measured above; no discrete VRAM counter on this machine.
 
 RAM guard (measured, `results/qa/jev_ram_guard.json`):
 
@@ -235,8 +235,9 @@ Example AI state actually sent (masked):
   `./build/jev-score` executed there → rpath is `@loader_path`, absolute vendor path removed, decision
   returned successfully.
 - Frozen-binary closed-network test (`tools/jev_offline_binary_check.py`):
-  exit 0, **0 external TCP connections**, AI loaded from `_MEIPASS/models/jev-style/...`,
-  30 decisions, 0 failures, 13.6 s wall (0.8B) / 18.4 s (2B).
+  exit 0, **0 external TCP connections** over the whole process tree, AI loaded from
+  `_MEIPASS/models/jev-style/...`, 30 decisions, 0 failures.
+  Wall time / reported peak RSS: 21.87 s / 1,488 MB (0.8B) and 15.21 s / 2,104 MB (2B).
 - Source-level offline test (`tools/jev_offline_check.py`): all `socket.connect` blocked, both
   models load and return probabilities → no HF access at runtime.
 - Manifests: `models/jev-style/<release>/package_manifest.json` records repository, revision
@@ -319,6 +320,7 @@ Manual CLI check:
 ## 14. Git status
 
 - Base commit for this work: `1b3e28d` (GUI/QA baseline).
-- This Jev-Style layer is committed as `f0c3f4d` (see `git log --oneline`).
+- This Jev-Style layer is committed as `3085778` ("Add Jev-Style decision-model AI
+  layer with offline packaging") — see `git log --oneline`.
 - Model binaries are untracked: `models/jev-style/*/*.gguf`, `models/jev-style/*/tokenizer/`,
   `vendor/` (see `.gitignore`). `git status` is clean for tracked files after the commit.
