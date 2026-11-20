@@ -1,11 +1,11 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-20T11:10:29.444150+00:00",
+  "generated_at": "2026-11-20T11:20:03.153200+00:00",
   "git": {
-    "commit": "c54c0d9989ce98e29429a4636d2b13357f45139b",
+    "commit": "451f2a77814224940c66f6731f6d341681c650b0",
     "branch": "main",
     "repository": "https://github.com/gomin90/piiscan.git",
-    "generated_at": "2026-11-20T11:10:29.479105+00:00"
+    "generated_at": "2026-11-20T11:20:03.189027+00:00"
   },
   "target": {
     "windows": {
@@ -32,8 +32,8 @@
       "scorer": "jev_score_v2.cpp"
     }
   },
-  "file_count": 221,
-  "total_bytes": 2652773407,
+  "file_count": 222,
+  "total_bytes": 2652781593,
   "total_mb": 2529.9,
   "files": [
     {
@@ -56,8 +56,8 @@
     },
     {
       "path": "README.md",
-      "size": 5516,
-      "sha256": "3cce39efb0b2f13e71a4b1a6ab578fdcfb98bc69532998806f3a9b66fdf684be",
+      "size": 5610,
+      "sha256": "7d5cc3bc53c96e9900b0a37e337cef67843af1483b26931c7493e4267a36ff30",
       "category": "other"
     },
     {
@@ -457,6 +457,12 @@
       "category": "docs"
     },
     {
+      "path": "docs/gpu-cuda-verification.md",
+      "size": 5555,
+      "sha256": "cf0e5685383177a68b70d3f003a3e342996e4aedd01e5d20151b6a8be87abb86",
+      "category": "docs"
+    },
+    {
       "path": "docs/jev-style-report.md",
       "size": 21146,
       "sha256": "183ce65390edafbf6311c510511f59874b38d92af8834402b1bd31e626c85cb1",
@@ -464,14 +470,14 @@
     },
     {
       "path": "docs/offline-build.md",
-      "size": 5024,
-      "sha256": "1a3f7c034c6f4dafb07d403c3d30434e09696d6dda7b993dcf417cd7ea53f20a",
+      "size": 5209,
+      "sha256": "b4bc16326a9b349a3ba70cc52ac55b1e1c68f71f1650ea94c49f77c5a64c5a00",
       "category": "docs"
     },
     {
       "path": "docs/qa-verification-report.md",
-      "size": 17050,
-      "sha256": "a13fe8b9b16c0deae3a0ff603842365f16fba96984d04491e5c3bbe2215cec48",
+      "size": 18962,
+      "sha256": "a094ecb94affc0e9df2b789bf0109606d9b5465551a5cf50053e5d3aa33b85f6",
       "category": "docs"
     },
     {
@@ -842,8 +848,8 @@
     },
     {
       "path": "scripts/windows/diagnose.ps1",
-      "size": 10208,
-      "sha256": "64cf39bbaf4262decacb5e908a81c6676b089d175cafe05c000dc722298c97b3",
+      "size": 10648,
+      "sha256": "c34069b5128a40a2c3d7b4cfe8b2c3a1af7efa5336aa924614a75d5f9d7a119f",
       "category": "scripts"
     },
     {

@@ -19,6 +19,7 @@ Windows 오프라인 PC에서 테스트하려면 [docs/windows-test-guide.md](do
 
 ```
 scripts\windows\diagnose.ps1                    # hardware + bundle report
+scripts\windows\gpu-check.ps1                   # why GPU was detected but CPU inference used
 scripts\windows\verify-offline-bundle.ps1       # SHA256 manifest check
 scripts\windows\install-offline.ps1             # pip install from vendor\wheels
 scripts\windows\run.bat --file samples\windows_sample.csv --debug

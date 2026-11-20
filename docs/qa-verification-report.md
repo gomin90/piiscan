@@ -218,26 +218,33 @@ canary 원문: `900101-1234567`, `010-1234-5678`, `min.kim@example.com`, `1234-5
 
 ---
 
-### RTX 5060 Laptop / CUDA 13.3 진단 (binary forensics, 2026-11-20)
+### RTX 5060 Laptop / CUDA 13.3 진단 (binary forensics)
 
-사용 보고: "CUDA backend present=True인데 실행 시 CPU 추론으로 전환". 원인은 네 gating 중
-적어도 두개가 실패하는 것이며, **실패 지점이 서로 다른层次**에 있다.
+사용 보고: "CUDA backend present=True인데 실행 시 CPU 추론으로 전환". GPU 추론은 아래 네 조건이
+**모든** satisfy될 때만 활성화된다.诊断 결과 세 조건이 동시에 실패한다.
 
-| # | Gate | 실측 결과 | 근거 |
+| # | 조건 | 실측 결과 | 근거 |
 |---|---|---|---|
-| 1 | NVIDIA GPU detects | OK (driver) | `nvidia-smi` |
-| 2 | `ggml-cuda.dll` beside exe | shipped bundle: 없음 | `runtime/windows` has only 4 CPU DLLs |
-| 3 | CUDA runtime DLL resolves | 12.4 asset은 `cudart64_12/cublas64_12/cublasLt64_12` import → CUDA 13.3 install에 없음 | PE import strings of 789 MB DLL |
-| 4 | native kernels for GPU arch | 12.4 = sm_50–sm_90, **no sm_120** (Blackwell), PTX ISA 8.4 | raw byte scan of `ggml-cuda.dll` |
-| 5 | llama.cpp CUDA build gating | `ggml/src/ggml-cuda/CMakeLists.txt`: "120 == Blackwell, needs CUDA v12.8" | vendored source |
+| 1 | NVIDIA GPU probe | driver probe 정상 | `nvidia-smi` |
+| 2 | `ggml-cuda.dll` beside exe | shipped bundle에는 없음 | `runtime/windows`에 CPU DLL 4개만 |
+| 3 | CUDA runtime DLL resolve | 12.4 backend은 `cudart64_12`, `cublas64_12`, `cublasLt64_12` import → CUDA 13.3에 없음 | 789 MB DLL byte scan |
+| 4 | GPU arch native kernels | 12.4 = sm_50~sm_90, **sm_120(Blackwell) 없음** | raw byte scan (see below) |
+| 5 | llama.cpp CUDA gating | `ggml/src/ggml-cuda/CMakeLists.txt`: `120 == Blackwell needs CUDA v12.8` | vendored source |
 
-Fix: vendor에 `llama-b12556-bin-win-cuda-13.5-x64.zip`(229,295,176 B, SHA256 `dde6d3f9…ae23`,
-arch `sm_86 sm_89 sm_103 sm_120 sm_121`, import `cublas64_13/cublasLt64_13`)로 Blackwell backends를
-포함했다. `scripts/windows/install-cuda-backend.ps1`은 `nvidia-smi compute_cap`로 자산을 선택한다.
-`gpu-check.ps1`은 `gpu.backend_log`·`layers_on_gpu`·device table를 실제 exe로부터 dump한다.
+실패 chain: `ggml_backend_load_all()`이 CUDA DLL을 load실패 → CUDA device 미注册 →
+`llama_supports_gpu_offload() == false` → CPU fallback. 이 시점의 원문 log는 stderr로 emit되지만
+report에 포함되지 않았다.
 
-**미실측**: RTX 5060 + 13.5 asset의 throughput·RSS 실측(Windows machine에서 실행 불가).
-Gate 2–4의 root cause는 확인되었고 fix가 packaged; throughput은 미verify.
+**Fix이 이미 shipped**: `vendor/llama-windows/llama-b12556-bin-win-cuda-13.5-x64.zip`
+(229,295,176 B, SHA256 `dde6d3f922b2225574ba32fe4bad227fb4784a8a5ebabc78c69fb3da7979ae23`,
+archs `sm_86 sm_89 sm_103 sm_120 sm_121`, CUDA runtime requirement `cublas64_13.dll` +
+`cublasLt64_13.dll`). `scripts/windows/install-cuda-backend.ps1`은 `nvidia-smi`의 `compute_cap`로
+자산을 선택하고, `scripts/windows/gpu-check.ps1`은 scorer의 `gpu.backend_log`, `layers_on_gpu`,
+device table을 실제 exe에서 dump한다.
+
+**미실측**: RTX 5060 + 13.5 asset의 throughput·RSS. macOS Metal side의 GPU offload(25/25 layers)는
+실측 완료. Windows Blackwell 실행은 이 machine에서 불가 → throughput 미verify.
+상세: [gpu-cuda-verification.md](./gpu-cuda-verification.md).
 
 ## 6. 오프라인 / 폐쇄망 배포
 

@@ -15,6 +15,8 @@ models/jev-style/2b-v4/           same structure with jev_score_v2.cpp
 runtime/windows/                  jev-score.exe, jev-score-v2.exe, llama.dll, ggml.dll,
                                   ggml-base.dll, libomp.dll, ggml-cpu-<arch>.dll (14),
                                   BUILD-INFO.json (provenance + SHA256)
+vendor/llama-windows/             llama.cpp CUDA backends: cuda-12.4 (364 MB, sm_50..sm_90)
+                                  and cuda-13.5 (229 MB, sm_86/89/103/120/121 for Blackwell)
 vendor/wheels/                    31 win_amd64 wheels, 105 MB (Python 3.12 x64)
 requirements/                     requirements.txt, requirements-win.txt,
                                   requirements-lock.txt (name, size, SHA256)

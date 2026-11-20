@@ -98,7 +98,12 @@ $diag["nvidia_smi"] = $nvsmi
 
 $cudaDll = Join-Path $root "runtime\windows\ggml-cuda.dll"
 $diag["cuda_backend_present"] = Test-Path -LiteralPath $cudaDll
-$diag["cuda_note"] = "CPU backend installed. The CUDA asset is bundled in vendor\llama-windows; extract it with scripts\windows\install-cuda-backend.ps1 (offline) and confirm inference on this machine."
+$computeCap = $null
+if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+    try { $computeCap = (& nvidia-smi --query-gpu=compute_cap --format=csv,noheader) -join "," } catch { $computeCap = "nvidia-smi compute_cap query failed" }
+}
+$diag["gpu_compute_cap"] = $computeCap
+$diag["cuda_note"] = "gpu_backend_present only means ggml-cuda.dll exists next to the exe. GPU inference additionally needs matching CUDA runtime DLLs and native kernels for this GPU's compute capability. Run scripts\windows\gpu-check.ps1 for the exact reason, and scripts\windows\install-cuda-backend.ps1 (offline, vendor\llama-windows) to install the backend."
 
 # --- Python -------------------------------------------------------------
 $pythonExe = $null
