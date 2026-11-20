@@ -65,9 +65,14 @@ class MainWindow(QWidget):
         hardware_widget = QWidget()
         hardware_layout = QVBoxLayout(hardware_widget)
         hw = self.hardware
-        gpu_line = f"GPU: {hw.gpu_vendor or '없음'} {hw.gpu_model or ''}".strip()
-        if hw.vram_total_gb:
-            gpu_line += f" (VRAM {hw.vram_total_gb:.1f}GB)"
+        if hw.gpu_model:
+            gpu_line = f"GPU: {hw.gpu_vendor} {hw.gpu_model}"
+            if hw.vram_total_gb:
+                gpu_line += f" (VRAM {hw.vram_total_gb:.1f}GB)"
+        elif hw.os_name == "Darwin" and hw.backend == "metal":
+            gpu_line = "GPU: Apple Silicon (Metal)"
+        else:
+            gpu_line = "GPU: 없음"
         gpu_line += " -> GPU 추론 가능" if hw.gpu_backend_ready else " -> CPU 추론"
         summary = (
             f"OS: {hw.os_name} | CPU: {hw.cpu_model} ({hw.cpu_count} cores)\n"
