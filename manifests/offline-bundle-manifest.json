@@ -1,8 +1,8 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-20T03:50:07.002926+00:00",
+  "generated_at": "2026-11-20T03:53:05.258787+00:00",
   "git": {
-    "commit": "67e0aa09ab13378ff235171f86b6d1da317bfeac",
+    "commit": "df78d20c5f5d3caf61808d546839d5d8a94adf57",
     "branch": "main",
     "repository": ""
   },
@@ -32,7 +32,7 @@
     }
   },
   "file_count": 212,
-  "total_bytes": 2397381745,
+  "total_bytes": 2397381820,
   "total_mb": 2286.3,
   "files": [
     {
@@ -829,8 +829,8 @@
     },
     {
       "path": "scripts/windows/diagnose.ps1",
-      "size": 10133,
-      "sha256": "27e2060b7f9f4e1b58a19878c6134abb19aaabc68d1da0d5983b97b8e227a77c",
+      "size": 10208,
+      "sha256": "64cf39bbaf4262decacb5e908a81c6676b089d175cafe05c000dc722298c97b3",
       "category": "scripts"
     },
     {

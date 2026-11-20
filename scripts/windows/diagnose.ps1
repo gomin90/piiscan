@@ -98,7 +98,7 @@ $diag["nvidia_smi"] = $nvsmi
 
 $cudaDll = Join-Path $root "runtime\windows\ggml-cuda.dll"
 $diag["cuda_backend_present"] = Test-Path -LiteralPath $cudaDll
-$diag["cuda_note"] = "CPU-only bundle. Run scripts\windows\fetch-cuda-backend.ps1 on a connected machine to add ggml-cuda.dll."
+$diag["cuda_note"] = "CPU backend installed. The CUDA asset is bundled in vendor\llama-windows; extract it with scripts\windows\install-cuda-backend.ps1 (offline) and confirm inference on this machine."
 
 # --- Python -------------------------------------------------------------
 $pythonExe = $null
