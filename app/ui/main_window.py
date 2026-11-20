@@ -69,11 +69,17 @@ class MainWindow(QWidget):
             gpu_line = f"GPU: {hw.gpu_vendor} {hw.gpu_model}"
             if hw.vram_total_gb:
                 gpu_line += f" (VRAM {hw.vram_total_gb:.1f}GB)"
-        elif hw.os_name == "Darwin" and hw.backend == "metal":
-            gpu_line = "GPU: Apple Silicon (Metal)"
+            if hw.gpu_compute_arch:
+                gpu_line += f" [{hw.gpu_compute_arch}]"
+            if hw.backend == "cpu":
+                reason = (hw.backend_detail or {}).get("reason", "no GPU backend library installed")
+                gpu_line += f" -> CPU 추론 ({reason})"
+            else:
+                gpu_line += " -> GPU 추론 가능"
+        elif hw.backend != "cpu":
+            gpu_line = f"GPU: {hw.backend} backend -> GPU 추론 가능"
         else:
-            gpu_line = "GPU: 없음"
-        gpu_line += " -> GPU 추론 가능" if hw.gpu_backend_ready else " -> CPU 추론"
+            gpu_line = "GPU: 없음 -> CPU 추론"
         summary = (
             f"OS: {hw.os_name} | CPU: {hw.cpu_model} ({hw.cpu_count} cores)\n"
             f"RAM: total {hw.total_ram_gb:.1f}GB / available {hw.available_ram_gb:.1f}GB\n"

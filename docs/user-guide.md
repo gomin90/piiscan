@@ -63,20 +63,30 @@ Clicking a result row fills the **탐지 상세 (행 단위)** table: 행번호 
 ## GPU (NVIDIA CUDA)
 
 `detect_hardware()` probes the GPU with `nvidia-smi` (PowerShell WMI fallback on
-Windows) and then checks whether a ggml GPU backend library is actually installed
-next to the scorer. A visible GPU without `ggml-cuda.dll` runs on the CPU, and the
-reason is printed in the 하드웨어 정보 tab and the AI status line.
+Windows), then checks three gates before claiming GPU inference: the ggml GPU backend
+library is installed next to the scorer, the CUDA runtime DLLs it imports resolve, and
+the GPU's compute capability was compiled into it. Any failing gate falls back to CPU
+and prints the exact reason in the 하드웨어 정보 tab, the AI status line and
+`--report-json`.
 
-For an RTX 5060 on Windows:
+For an RTX 5060 (Blackwell, sm_120) on Windows:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\windows\diagnose.ps1
+powershell -ExecutionPolicy Bypass -File scripts\windows\gpu-check.ps1
 powershell -ExecutionPolicy Bypass -File scripts\windows\install-cuda-backend.ps1
 powershell -ExecutionPolicy Bypass -File scripts\windows\build-jev-score.ps1 -GPU
 ```
 
-`--gpu-layers 0` forces CPU inference. Blackwell (RTX 50xx) support depends on the
-bundled CUDA 12.4 llama.cpp build and must be verified by an actual inference run.
+`gpu-check.ps1` is the diagnostic: it lists the runtime DLLs, the CUDA DLLs
+`ggml-cuda.dll` requires, the driver CUDA version, the GPU compute capability vs the
+archs baked into the backend, and captures llama.cpp's stderr when the scorer tries to
+load the GPU.
+
+`--gpu-layers 0` forces CPU inference. GPU support depends on which backend binary is
+installed: the CUDA 12.4 asset only carries kernels for sm_50-sm_90, so it cannot run
+on Blackwell; the CUDA 13.5 asset (also vendored) carries sm_86/sm_89/sm_103/sm_120/
+sm_121. `install-cuda-backend.ps1` picks the right one automatically.
 
 ## AI behaviour
 

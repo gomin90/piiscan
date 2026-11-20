@@ -1,13 +1,21 @@
 """하드웨어 탐지: GPU/CUDA availability, RAM, CPU, backend 선택.
 
-GPU is only *usable* when a GPU-capable llama.cpp backend is actually present next to
-the scorer binary. A detected NVIDIA card without ggml-cuda.dll therefore falls back to
-CPU with an explicit note, so the report never claims a GPU acceleration that is not real.
+GPU is only *usable* when three things are all true:
+  1. an NVIDIA/Apple GPU is present,
+  2. the matching ggml backend library (ggml-cuda.dll / libggml-metal.dylib) sits next to
+     the scorer binary, and
+  3. that backend can actually initialise on this machine: its CUDA runtime DLLs resolve
+     and the GPU's compute capability was compiled into the backend (or can be JIT-ed).
+
+Any missing link falls back to CPU with an explicit note, so the report never claims a GPU
+acceleration that is not real.
 """
 from __future__ import annotations
 
+import ctypes
 import os
 import platform
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -34,6 +42,8 @@ class HardwareReport:
     cuda_runtime: str
     backend: str  # cpu | cuda | metal
     gpu_backend_ready: bool = False  # a GPU-capable llama.cpp backend is actually installed
+    gpu_compute_arch: str = ""       # GPU compute capability, e.g. sm_120 for an RTX 5060
+    backend_detail: dict = field(default_factory=dict)  # why the backend is (un)usable
     notes: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
@@ -49,6 +59,8 @@ class HardwareReport:
             "cuda": self.cuda_runtime,
             "backend": self.backend,
             "gpu_backend_ready": self.gpu_backend_ready,
+            "gpu_compute_arch": self.gpu_compute_arch,
+            "backend_detail": self.backend_detail,
             "notes": self.notes,
         }
 
@@ -122,6 +134,204 @@ def gpu_backend_present(binary_dir: Path | None = None, system: str | None = Non
     return False, ""
 
 
+# ---------------------------------------------------------------- CUDA forensics
+# ggml loads its backends dynamically: ggml-base.dll looks for ggml-<name>.dll in the
+# directory of the *executable* and the current working directory. A ggml-cuda.dll that
+# cannot be loaded (missing CUDA runtime DLLs, unsupported GPU arch) is skipped silently
+# except for a llama.cpp warning on stderr, and inference continues on the CPU.
+
+_CUDA_DLL_PATTERN = re.compile(rb"(?:cudart|cublasLt|cublas)64_\d+\.dll")
+
+
+def _linked_cuda_dlls(path: Path) -> list[str]:
+    """CUDA runtime DLL names referenced by a backend binary (its import table).
+
+    Scanning the raw bytes is robust and dependency-free; the names appear verbatim in
+    the PE import section, e.g. cudart64_12.dll in the llama.cpp CUDA 12.4 build.
+    """
+    found: list[str] = []
+    try:
+        with path.open("rb") as handle:
+            tail = b""
+            while True:
+                block = handle.read(1 << 22)
+                if not block:
+                    break
+                chunk = tail + block
+                tail = chunk[-16:]
+                for match in _CUDA_DLL_PATTERN.finditer(chunk):
+                    name = match.group(0).decode("utf-8", "replace")
+                    if name not in found:
+                        found.append(name)
+    except OSError:
+        return []
+    return found
+
+
+def _cuda_dll_search_dirs(binary_dir: Path | None) -> list[Path]:
+    """Directories Windows would resolve a CUDA runtime DLL from when loading ggml-cuda.dll."""
+    dirs = []
+    if binary_dir:
+        dirs.append(Path(binary_dir))
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if entry:
+            dirs.append(Path(entry))
+    toolkit_root = Path(os.environ.get("CUDA_PATH", r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"))
+    if toolkit_root.exists():
+        dirs.append(toolkit_root / "bin")
+        for child in toolkit_root.iterdir():
+            if child.is_dir():
+                dirs.append(child / "bin")
+    return [d for d in dirs if d and d.is_dir()]
+
+
+def _compiled_cuda_archs(path: Path) -> tuple[list[str], list[str]]:
+    """Device code (sm_XX) and PTX (compute_XX) targets embedded in a ggml-cuda backend."""
+    device_archs: set[str] = set()
+    ptx_archs: set[str] = set()
+    try:
+        with path.open("rb") as handle:
+            chunk = b""
+            while True:
+                block = handle.read(1 << 22)
+                if not block:
+                    break
+                chunk = chunk[-16:] + block
+                device_archs.update(match.group(1).decode() for match in re.finditer(rb"sm_(\d{2,3})", chunk))
+                ptx_archs.update(match.group(1).decode() for match in re.finditer(rb"compute_(\d{2,3})", chunk))
+    except OSError:
+        return [], []
+    return sorted(device_archs), sorted(ptx_archs)
+
+
+def _device_arch_from_smi() -> str:
+    """Compute capability of the first NVIDIA GPU straight from nvidia-smi (e.g. 12.0 -> sm_120)."""
+    if not shutil.which("nvidia-smi"):
+        return ""
+    try:
+        output = subprocess.run(["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
+                                capture_output=True, text=True, timeout=6)
+    except (subprocess.TimeoutExpired, OSError):
+        return ""
+    for line in output.stdout.splitlines():
+        cap = line.strip().replace(".", "")
+        if cap.isdigit():
+            return "sm_" + cap
+    return ""
+
+
+def _cuda_driver_version() -> str:
+    """CUDA version the installed NVIDIA driver exposes (from nvidia-smi header)."""
+    if not shutil.which("nvidia-smi"):
+        return ""
+    try:
+        output = subprocess.run(["nvidia-smi"], capture_output=True, text=True, timeout=6)
+    except (subprocess.TimeoutExpired, OSError):
+        return ""
+    match = re.search(r"CUDA Version:\s*([0-9.]+)", output.stdout)
+    return match.group(1) if match else ""
+
+
+def cuda_device_arch() -> str:
+    """Compute capability of the first CUDA device, e.g. 'sm_120' for an RTX 5060.
+
+    Uses the CUDA runtime directly (ctypes), so it works without llama.cpp installed.
+    Returns "" when no CUDA runtime can be loaded or no device is present.
+    """
+    for name in ("cudart64_13.dll", "cudart64_12.dll", "cudart64_110.dll", "cudart.dll", "libcudart.so", "libcudart.so.12"):
+        try:
+            runtime = ctypes.CDLL(name)
+            runtime.cudaInitialize()
+        except OSError:
+            continue
+        try:
+            count = ctypes.c_int(0)
+            if runtime.cudaDeviceGetCount(ctypes.byref(count)) != 0 or count.value <= 0:
+                continue
+            major = ctypes.c_int(0)
+            minor = ctypes.c_int(0)
+            # CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR = 17, MINOR = 18
+            if runtime.cudaDeviceGetAttribute(ctypes.byref(major), 17, 0) != 0:
+                continue
+            runtime.cudaDeviceGetAttribute(ctypes.byref(minor), 18, 0)
+            return f"sm_{major.value}{minor.value}"
+        except Exception:
+            continue
+    return ""
+
+
+def analyze_cuda_backend(library: Path, binary_dir: Path | None = None,
+                         device_arch: str | None = None) -> dict:
+    """Diagnose one CUDA backend library: runtime imports, compiled archs, GPU match.
+
+    A CUDA backend is usable only when three independent gates pass:
+      1. the ggml-cuda.dll library is installed where llama.cpp looks for it
+         (next to the scorer, the CWD, or GGML_BACKEND_PATH);
+      2. every CUDA runtime DLL it imports resolves on this machine;
+      3. it contains native device code for the GPU's compute capability
+         (or PTX the driver can JIT).
+    Reporting "CPU inference" without naming the failing gate is what made the
+    RTX 5060 / CUDA 13.3 case look like a silently ignored GPU.
+    """
+    status = {
+        "present": True,
+        "library": str(library),
+        "runtime_dlls": [],
+        "missing": [],
+        "archs": [],
+        "ptx_archs": [],
+        "device_arch": "",
+        "driver_cuda": "",
+        "usable": False,
+        "reason": "",
+    }
+    required = _linked_cuda_dlls(Path(library))
+    status["runtime_dlls"] = required
+    search_dirs = [Path(binary_dir)] if binary_dir else []
+    search_dirs += _cuda_dll_search_dirs(binary_dir)
+    status["missing"] = [name for name in required
+                         if not any((directory / name).is_file() for directory in search_dirs)]
+    status["archs"], status["ptx_archs"] = _compiled_cuda_archs(Path(library))
+    status["device_arch"] = device_arch if device_arch is not None else (
+        cuda_device_arch() or _device_arch_from_smi()
+    )
+    status["driver_cuda"] = _cuda_driver_version()
+
+    if status["missing"]:
+        majors = sorted({name.split("_")[1].split(".")[0] for name in status["missing"]})
+        status["reason"] = (
+            "ggml-cuda.dll needs " + ", ".join(status["missing"]) + " (CUDA " + "/".join(majors) + " runtime), "
+            "which is not installed here -> llama.cpp cannot load the CUDA backend and runs on CPU"
+        )
+    elif status["device_arch"] and status["archs"] and status["device_arch"] not in status["archs"]:
+        jit = ("; PTX JIT is only possible for compute_" + status["ptx_archs"][-1]) if status["ptx_archs"] else ""
+        status["reason"] = (
+            f"GPU is {status['device_arch']} but the backend has native kernels only for "
+            + ", ".join("sm_" + a for a in status["archs"]) + "; no kernels for this GPU" + jit
+        )
+    elif not status["device_arch"]:
+        status["usable"] = True
+        status["reason"] = "library and CUDA runtime DLLs resolve; GPU compute capability not queryable"
+    else:
+        status["usable"] = True
+        status["reason"] = f"library, CUDA runtime and native kernels for {status['device_arch']} all match"
+    return status
+
+
+def cuda_backend_status(binary_dir: Path | None = None) -> dict:
+    """Locate the CUDA backend in a runtime directory and diagnose it."""
+    binary_dir = Path(binary_dir) if binary_dir else Path("runtime/windows")
+    library = next((binary_dir / name for name in ("ggml-cuda.dll", "libggml-cuda.so", "libggml-cuda.dylib")
+                    if (binary_dir / name).is_file()), None)
+    if library is None:
+        return {
+            "present": False, "library": "", "runtime_dlls": [], "missing": [], "archs": [],
+            "ptx_archs": [], "device_arch": "", "driver_cuda": "", "usable": False,
+            "reason": "no ggml-cuda backend in " + str(binary_dir) + " -> llama.cpp must run on CPU",
+        }
+    return analyze_cuda_backend(library, binary_dir)
+
+
 def _nvidia_gpu() -> tuple[str, str, float, float, str]:
     """Return (vendor, model, vram_total, vram_free, driver) using nvidia-smi or PowerShell."""
     if not shutil.which("nvidia-smi"):
@@ -188,9 +398,16 @@ def gpu_plan(scorer_path: Path, hardware: HardwareReport, requested_layers: int 
     plan falls back to CPU and explains why. VRAM smaller than the model triggers a
     partial offload instead of a full one.
     """
-    backend_ready, _ = gpu_backend_present(Path(scorer_path).parent,
-                                          getattr(hardware, "os_name", None))
+    scorer_dir = Path(scorer_path).parent
+    backend_ready, _ = gpu_backend_present(scorer_dir, getattr(hardware, "os_name", None))
     hw_backend = getattr(hardware, "backend", "cpu")
+
+    # A GPU backend library that cannot load (wrong CUDA runtime, no kernels for the GPU
+    # architecture) is a CPU run in disguise: check it before promising GPU layers.
+    if hw_backend == "cuda" and backend_ready and requested_layers != 0:
+        cuda = cuda_backend_status(scorer_dir)
+        if not cuda["usable"]:
+            return "cpu", 0, cuda["reason"]
 
     if requested_layers is not None:
         layers = max(0, int(requested_layers))
@@ -227,20 +444,31 @@ def detect_hardware(binary_dir: Path | None = None, system: str | None = None) -
     if not vendor and system == "Windows":
         vendor, model, vram_total, vram_free, cuda = _gpu_via_powershell()
     notes: list[str] = []
+    gpu_arch = ""
+    backend_detail: dict = {}
 
     gpu_found = bool(vendor)
     backend_ready, backend_path = gpu_backend_present(binary_dir, system)
 
     if vendor == "NVIDIA":
-        if backend_ready:
+        detail = cuda_backend_status(binary_dir) if backend_ready else {
+            "present": False, "usable": False,
+            "reason": "ggml-cuda.dll is not installed next to the scorer",
+        }
+        arch = detail.get("device_arch", "") or cuda_device_arch()
+        if detail.get("usable"):
             backend = "cuda"
-            notes.append(f"CUDA backend 사용 가능: {backend_path}")
+            notes.append(f"CUDA backend 사용 가능: {backend_path} ({arch or 'compute capability 알 수 없음'})")
         else:
             backend = "cpu"
             notes.append(
-                f"NVIDIA {model} 감지(VRAM {vram_total:.1f}GB): ggml-cuda.dll 없음 -> CPU 추론. "
-                "GPU 사용려면 scripts/windows/install-cuda-backend.ps1 실행 후 scorer rebuild(-GPU)"
+                f"NVIDIA {model} 감지(VRAM {vram_total:.1f}GB) but CUDA cannot be used: {detail['reason']}. "
+                "GPU 추론하려면 GPU arch/runtime이 맞는 ggml-cuda.dll을 scripts/windows/install-cuda-backend.ps1로 설치해야 함"
             )
+        detail["gpu_model"] = model
+        detail["gpu_vendor"] = vendor
+        gpu_arch = arch
+        backend_detail = detail
     elif vendor and vendor != "NVIDIA":
         backend = "cpu"
         notes.append(
@@ -250,6 +478,7 @@ def detect_hardware(binary_dir: Path | None = None, system: str | None = None) -
     elif system == "Darwin":
         if backend_ready:
             backend = "metal"
+            vendor, model = "Apple Silicon", "Metal"
             notes.append(f"Apple Silicon Metal backend: {backend_path}")
         else:
             backend = "cpu"
@@ -274,5 +503,7 @@ def detect_hardware(binary_dir: Path | None = None, system: str | None = None) -
         cuda_runtime=cuda,
         backend=backend,
         gpu_backend_ready=backend_ready,
+        gpu_compute_arch=gpu_arch,
+        backend_detail=backend_detail,
         notes=notes,
     )

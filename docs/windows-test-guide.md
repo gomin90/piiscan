@@ -112,37 +112,78 @@ Optional native rebuild of the scorer (recommended for a confirmed Windows binar
 powershell -ExecutionPolicy Bypass -File scripts\windows\build-jev-score.ps1
 ```
 
-Optional NVIDIA backend. The official llama.cpp CUDA 12.4 asset is **already inside
-the bundle**, so no download is needed:
+Optional NVIDIA backend. Two official llama.cpp b12556 CUDA assets are vendored in
+`vendor\llama-windows`:
+
+| asset | size | SHA256 | GPU architectures | needs |
+|---|---|---|---|---|
+| `llama-b12556-bin-win-cuda-13.5-x64.zip` | 229,295,176 B | `dde6d3f922b2225574ba32fe4bad227fb4784a8a5ebabc78c69fb3da7979ae23` | sm_86, sm_89, sm_103, sm_120, sm_121 | `cublas64_13.dll`, `cublasLt64_13.dll` |
+| `llama-b12556-bin-win-cuda-12.4-x64.zip` | 364,747,106 B | `e18df7a7189e1446ca338aa4f04529acb4dce7537164baed2fbc624e48864932` | sm_50, sm_61, sm_70, sm_75, sm_80, sm_90 | `cudart64_12.dll`, `cublas64_12.dll`, `cublasLt64_12.dll` |
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\windows\install-cuda-backend.ps1   # offline, from vendor\llama-windows
-# or, if you want a fresh copy from the llama.cpp release page:
-powershell -ExecutionPolicy Bypass -File scripts\windows\fetch-cuda-backend.ps1     # needs internet once
+powershell -ExecutionPolicy Bypass -File scripts\windows\install-cuda-backend.ps1        # auto-pick from nvidia-smi compute_cap
+powershell -ExecutionPolicy Bypass -File scripts\windows\install-cuda-backend.ps1 -CudaVersion 13.5
+powershell -ExecutionPolicy Bypass -File scripts\windows\fetch-cuda-backend.ps1 -CudaVersion 13.5   # needs internet once
 ```
 
-`install-cuda-backend.ps1` verifies the ZIP SHA256 before extracting `ggml-cuda.dll`
-into `runtime\windows`. Whether the GPU is then actually used must come from a real run.
+`install-cuda-backend.ps1` verifies the ZIP SHA256, extracts `ggml-cuda.dll` (and the
+matching `llama.dll` / `ggml*.dll`, byte-identical to the CPU asset) into
+`runtime\windows`, and copies `cublas*.dll` from `%CUDA_PATH%\bin` so the CUDA runtime
+is resolvable without internet.
 
 ### Why "GPU 있음에도 CPU 추론" happens
 
-Three separate things must all be true, and the app now reports each one in the
-**하드웨어 정보** tab and in `--report-json`:
+Four separate things must all be true. The app now reports each one in the
+**하드웨어 정보** tab, in `--report-json` (`hardware.backend_detail`) and in the AI
+status line:
 
 1. **Detection** - `nvidia-smi` must be on PATH. If it is not, the probe falls back to
    Windows WMI (`Get-CimInstance Win32_VideoController`), so the card is still listed.
-2. **A GPU-capable backend library must sit next to the scorer** - `gpu_backend_present()`
-   looks for `ggml-cuda.dll` (Windows) / `libggml-metal.dylib` (macOS) in the scorer
-   directory and in `runtime\windows`. The shipped bundle contains CPU-only DLLs, so a
-   GPU is *detected* but inference still runs on the CPU until step 3 is done.
-3. **The scorer binary must be built with that backend** - the prebuilt
-   `runtime\windows\jev-score*.exe` links the CPU llama.cpp build. Run
-   `build-jev-score.ps1 -GPU` on the target machine after installing the CUDA DLLs.
+   "GPU detected" therefore only means the card exists, not that CUDA works.
+2. **A CUDA backend library must sit next to the scorer.** `ggml_backend_load_all()`
+   searches `GGML_BACKEND_DIR` (not set in official builds), the **executable's own
+   directory**, then the **current working directory**. `PATH` is *not* searched, so
+   `ggml-cuda.dll` has to be in `runtime\windows` next to `jev-score.exe`.
+3. **The CUDA runtime DLLs that `ggml-cuda.dll` imports must be resolvable.** llama.cpp
+   statically links `cudart`, but `cublas`/`cublasLt` stay dynamic: the CUDA 12.4 asset
+   needs `cublas64_12.dll`, and a machine with only CUDA 13 installed does not have it.
+   `cuda_backend_status()` reports the exact missing DLL.
+4. **The GPU's compute capability must be compiled into that DLL.** The CUDA 12.4 asset
+   contains device code only for sm_50-sm_90. Per llama.cpp's own build table, Blackwell
+   (sm_120, i.e. RTX 50 series) requires CUDA >= 12.8, so an RTX 5060 cannot run the
+   12.4 backend at all - use the 13.5 asset.
 
-`gpu_plan()` downgrades to CPU and writes the reason into the AI status line; VRAM
-smaller than the model produces a partial offload instead of `--ngl 999`. Use
-`--gpu-layers 0` (or `--cpu-only`) to force CPU deterministically.
-RTX 5060 is Blackwell; the bundled CUDA 12.4 asset may not support it, so measure.
+Forensics on the shipped files (measured here, not inferred):
+
+```
+vendor\llama-windows\llama-b12556-bin-win-cuda-12.4-x64.zip
+  ggml-cuda.dll     789,349,376 B
+  imports: ggml-base.dll, cudart64_12.dll, cublas64_12.dll, cublasLt64_12.dll, nvcuda.dll
+  embedded archs: sm_50, sm_61, sm_70, sm_75, sm_80, sm_90   (PTX ISA 8.4)
+
+vendor\llama-windows\llama-b12556-bin-win-cuda-13.5-x64.zip
+  ggml-cuda.dll     220,921,856 B
+  imports: ggml-base.dll, cublas64_13.dll, cublasLt64_13.dll
+  embedded archs: sm_86, sm_89, sm_103, sm_120, sm_121
+```
+
+`runtime\windows` ships **no** `ggml-cuda.dll` at all, so until the install script is
+run the GPU is only "detected", never used. `jev-score.exe` and `jev-score-v2.exe`
+both import only `llama.dll`, `ggml.dll`, `ggml-base.dll` - GPU support comes entirely
+from the dynamically loaded backend, not from the EXE itself.
+
+Run this to get the exact failure on your machine (it prints driver CUDA version, the
+DLLs the backend needs, which are missing, the compiled archs vs the GPU's compute
+capability, and the llama.cpp stderr when the scorer actually tries to load the GPU):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\gpu-check.ps1
+```
+
+`gpu_plan()` refuses to promise GPU layers when any of gates 2-4 fails, and writes the
+reason into the AI status line and `hardware.backend_detail`. VRAM smaller than the
+model produces a partial offload instead of `--ngl 999`. Use `--gpu-layers 0` (or
+`--cpu-only`) to force CPU deterministically.
 
 ## 5. 실행 및 결과 수집
 

@@ -143,6 +143,9 @@ class JevStyleEngine:
 
     def close(self) -> None:
         if self.adapter is not None:
+            # Keep the last adapter summary so the report still shows which backend
+            # and how many layers actually ran on the GPU after the model is released.
+            self.closing_summary = self.adapter.summary()
             self.peak_rss_mb = self.adapter.peak_rss_mb
             self.decisions = self.adapter.decisions
             self.failures = self.adapter.failures
@@ -153,7 +156,7 @@ class JevStyleEngine:
         if self.adapter is not None:
             data = self.adapter.summary()
         else:
-            data = {
+            data = dict(getattr(self, "closing_summary", None) or {
                 "model": self.spec.model_name if self.spec else None,
                 "model_key": self.spec.key if self.spec else None,
                 "quant": self.spec.quant if self.spec else None,
@@ -168,7 +171,7 @@ class JevStyleEngine:
                 "context_limit": self.spec.context_limit if self.spec else 0,
                 "scorer_info": {},
                 "error": self.skipped_reason,
-            }
+            })
         data["engine"] = "jev-style"
         data["skipped_reason"] = self.skipped_reason
         return data

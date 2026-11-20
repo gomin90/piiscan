@@ -60,6 +60,7 @@
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <regex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -247,6 +248,46 @@ static void usage() {
                     "[--flash-attn default|auto|on|off] [--n-outputs-max N] [--cache-type f16|f32]\n");
 }
 
+// GPU diagnostics: llama.cpp reports CUDA/Metal failures only through its log, so keep the
+// warning/error lines plus the layer-offload summary in the ready message. A CPU fallback then
+// has a measurable cause (missing ggml-cuda.dll, wrong CUDA runtime, no kernel for the GPU arch)
+// instead of looking like a silently ignored GPU.
+static std::string backend_log;
+
+static void logged_log(enum ggml_log_level level, const char * text, void *) {
+    if (level >= GGML_LOG_LEVEL_WARN) {
+        fputs(text, stderr);
+        backend_log += text;
+    } else if (strstr(text, "offloaded") || strstr(text, "using device")) {
+        backend_log += text;
+    }
+    if (backend_log.size() > 3000) backend_log.erase(0, backend_log.size() - 3000);
+}
+
+// What the process can actually do with the GPU, as reported by the ggml backend registry.
+static json gpu_info(int ngl) {
+    json devices = json::array();
+    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        enum ggml_backend_dev_type type = ggml_backend_dev_type(dev);
+        if (type != GGML_BACKEND_DEVICE_TYPE_GPU && type != GGML_BACKEND_DEVICE_TYPE_IGPU) continue;
+        size_t free_mem = 0, total_mem = 0;
+        ggml_backend_dev_memory(dev, &free_mem, &total_mem);
+        devices.push_back({{"name", ggml_backend_dev_name(dev)},
+                           {"description", ggml_backend_dev_description(dev)},
+                           {"vram_mb", (int)(total_mem / (1024 * 1024))}});
+    }
+    std::string offload = "cpu";
+    std::regex re(R"(offloaded (\d+)/(\d+) layers)");
+    std::smatch match;
+    if (regex_search(backend_log, match, re)) offload = match[1].str() + "/" + match[2].str();
+    return {{"requested_ngl", ngl},
+            {"gpu_backend_present", llama_supports_gpu_offload()},
+            {"layers_on_gpu", offload},
+            {"gpu_devices", devices},
+            {"backend_log", backend_log}};
+}
+
 int main(int argc, char ** argv) {
     std::string model_path, fa = "default", cache_type = "f16";
     int n_ctx = 32768, n_ubatch = 2048, ngl = 999, threads = 8, n_out = 512;
@@ -270,9 +311,7 @@ int main(int argc, char ** argv) {
         (fa != "default" && fa != "auto" && fa != "on" && fa != "off")) { usage(); return 2; }
 
     const auto t0 = clk::now();
-    llama_log_set([](enum ggml_log_level level, const char * text, void *) {
-        if (level >= GGML_LOG_LEVEL_WARN) fputs(text, stderr);
-    }, nullptr);
+    llama_log_set(logged_log, nullptr);
     llama_backend_init();
     llama_model_params mp = llama_model_default_params();
     mp.n_gpu_layers = ngl;
@@ -314,6 +353,7 @@ int main(int argc, char ** argv) {
                        {"n_ctx", S.n_ctx}, {"n_batch", S.n_batch}, {"cache_type", cache_type}, {"n_ubatch", S.n_ubatch},
                        {"n_seq_max", (int) llama_n_seq_max(S.ctx)}, {"n_outputs_max", S.n_outputs_max},
                        {"n_vocab", S.n_vocab}, {"desc", desc}, {"load_ms", ms_since(t0)},
+                       {"gpu", gpu_info(ngl)},
                        {"system_info", llama_print_system_info()}};
     std::cout << info.dump() << std::endl;
 

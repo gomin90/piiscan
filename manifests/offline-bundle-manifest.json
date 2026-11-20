@@ -1,11 +1,11 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-20T10:10:28.171305+00:00",
+  "generated_at": "2026-11-20T11:10:29.444150+00:00",
   "git": {
-    "commit": "51d2b90a7cca62544ecbca85067ea8e9ebfa646e",
+    "commit": "c54c0d9989ce98e29429a4636d2b13357f45139b",
     "branch": "main",
     "repository": "https://github.com/gomin90/piiscan.git",
-    "generated_at": "2026-11-20T10:10:28.205909+00:00"
+    "generated_at": "2026-11-20T11:10:29.479105+00:00"
   },
   "target": {
     "windows": {
@@ -32,9 +32,9 @@
       "scorer": "jev_score_v2.cpp"
     }
   },
-  "file_count": 218,
-  "total_bytes": 2423018220,
-  "total_mb": 2310.8,
+  "file_count": 221,
+  "total_bytes": 2652773407,
+  "total_mb": 2529.9,
   "files": [
     {
       "path": ".gitattributes",
@@ -80,8 +80,8 @@
     },
     {
       "path": "app/ai/gpu_detector.py",
-      "size": 10254,
-      "sha256": "ee1b53e3bf5242e9d93a8bbd9fa940f1bde8d30a40f1cb212bb48562eb34e6ce",
+      "size": 20489,
+      "sha256": "3ca214daee5d7395ed2d46ac705f48b0e7a89b483edad7eb1a3ea03826bbf3f1",
       "category": "app"
     },
     {
@@ -92,8 +92,8 @@
     },
     {
       "path": "app/ai/jev/adapter.py",
-      "size": 19844,
-      "sha256": "26a20ca307b50adf92cad44012e8672b9ee2d03ecfd0d09849aa6ec210db910e",
+      "size": 21294,
+      "sha256": "17e46d3a853284ec53b902a3e5fb21a8c803da7d2d952c0c6c438dbaf4fe7e5a",
       "category": "app"
     },
     {
@@ -104,8 +104,8 @@
     },
     {
       "path": "app/ai/jev/engine.py",
-      "size": 7670,
-      "sha256": "36842112b05ffc7f70abca193079257c3057cb3f7506cc419505e9f85e446a48",
+      "size": 7947,
+      "sha256": "3d2111281103905f567d07865801aa75962bcbabf01a388bcebfdb46e51dfc9e",
       "category": "app"
     },
     {
@@ -386,8 +386,8 @@
     },
     {
       "path": "app/ui/main_window.py",
-      "size": 8026,
-      "sha256": "1372de20d710292700f5da722f6760caefe5c823d9cc3876eb24b3407bd541c3",
+      "size": 8475,
+      "sha256": "4f8a12f0072eb27eee014d3410e3fc85657ecc92afc93f6414a38d4ac6368a84",
       "category": "app"
     },
     {
@@ -476,14 +476,14 @@
     },
     {
       "path": "docs/user-guide.md",
-      "size": 3503,
-      "sha256": "f5c05f6336d1c63baac6011d675d79cb81ff3283ee5d2e3ba81700631faf3ed5",
+      "size": 4139,
+      "sha256": "c5b9e8acc48138a61ad8ca7b64909073d95ead95c2034672c2d54e95670cebed",
       "category": "docs"
     },
     {
       "path": "docs/windows-test-guide.md",
-      "size": 10341,
-      "sha256": "1c8ce75d23b8a1b7aaee91d4975833abe358d61fff3d4d57ebc70048d1ca27ac",
+      "size": 12716,
+      "sha256": "92a4fa782f338b09c68906e64a803674e08faf260a98057c1c906d0f913427f1",
       "category": "docs"
     },
     {
@@ -512,8 +512,8 @@
     },
     {
       "path": "models/jev-style/0.8b-v3/jev_score.cpp",
-      "size": 18088,
-      "sha256": "90d848a61546286c74e484f61126f572b79c6f77f835450d8fc970b8547ce603",
+      "size": 20020,
+      "sha256": "8af3f6b9d228591f931fd180fa8dd63bdeea75cccc12fa337a1e2a36e2b638a7",
       "category": "model"
     },
     {
@@ -590,8 +590,8 @@
     },
     {
       "path": "models/jev-style/2b-v4/jev_score_v2.cpp",
-      "size": 18208,
-      "sha256": "7d3ac0ba21b5451aee3fff179d2b8451a5a99dcc2df05425297808a7a4c8413b",
+      "size": 20110,
+      "sha256": "a2d76f12bf89a4997f4f41f7304e542681ba4cb9ac80183a8af87091817747b8",
       "category": "model"
     },
     {
@@ -686,8 +686,8 @@
     },
     {
       "path": "runtime/windows/BUILD-INFO.json",
-      "size": 6418,
-      "sha256": "c0b9dff56c7a2c9f117e62e7face2cea9d1006cab6bceaf858f29a323af4ac1a",
+      "size": 9148,
+      "sha256": "fb2eb4df82933f162cd6f5f8b2fe179081144e2021dfce8ae616721c04f1d10c",
       "category": "windows_runtime"
     },
     {
@@ -788,14 +788,14 @@
     },
     {
       "path": "runtime/windows/jev-score-v2.exe",
-      "size": 13251363,
-      "sha256": "647b27e38815801c4c75636a4b357c77772cbd4ccf325bbbf26b5780c5f87773",
+      "size": 13460861,
+      "sha256": "6338f672ffba61dcaadc438560a9f1e9a69b651ea85c13ffea712d87f84d6460",
       "category": "windows_runtime"
     },
     {
       "path": "runtime/windows/jev-score.exe",
-      "size": 13241936,
-      "sha256": "6ab05178af3fca18a802b748cdeee6ef54bef6ea4aa16d81e128a3b1f2f68972",
+      "size": 13453976,
+      "sha256": "dba29b5bae82065b89690caea42151b657eb0843d41c27528b03e6d1dad7e304",
       "category": "windows_runtime"
     },
     {
@@ -815,6 +815,12 @@
       "size": 3955200,
       "sha256": "a07715b34b90dd9263a5629890c88ba74464d41a17e24ac117883d4707d9e4d7",
       "category": "windows_runtime"
+    },
+    {
+      "path": "samples/business_table_sample.csv",
+      "size": 823,
+      "sha256": "b33a99507ac87db5d5e1f95f1ec42e8d16822c811551e14a125be05057eb7f89",
+      "category": "other"
     },
     {
       "path": "samples/windows_sample.csv",
@@ -842,14 +848,20 @@
     },
     {
       "path": "scripts/windows/fetch-cuda-backend.ps1",
-      "size": 2411,
-      "sha256": "a967ae5cdcc08db273083f4809daf1b57886482d5591222e1542008e6f0a1d07",
+      "size": 3025,
+      "sha256": "1f2f04d70e7751ff3ad7bdef1407975dbc0fb99f4550e935ce454eb4ae3e42cc",
+      "category": "scripts"
+    },
+    {
+      "path": "scripts/windows/gpu-check.ps1",
+      "size": 8130,
+      "sha256": "e11f4e723b2e2d640051349c5f8fd022af559a5d069c2df98910cc5449fc91e1",
       "category": "scripts"
     },
     {
       "path": "scripts/windows/install-cuda-backend.ps1",
-      "size": 1766,
-      "sha256": "470e255ed72639b4b1798bc0428c77b7a1a285f341ea4c7684ab60fd99ae1e45",
+      "size": 4415,
+      "sha256": "4c185fbdf331292399aefe603b713c55bfffeef5d87067086646aa0e574b56f7",
       "category": "scripts"
     },
     {
@@ -938,8 +950,8 @@
     },
     {
       "path": "tests/qa/test_gui_headless.py",
-      "size": 4216,
-      "sha256": "bce43ea5c6a007dcf44e15d34d78108536f14d4519a9047508349abbca3165fe",
+      "size": 5665,
+      "sha256": "cde8081e3f20f5798ffeca1a49661121ce1ce4309fd5efa909e4c87efc6a8962",
       "category": "other"
     },
     {
@@ -968,8 +980,8 @@
     },
     {
       "path": "tests/unit/test_ai.py",
-      "size": 6719,
-      "sha256": "bb6b0486f3c7f43f1a047790f0657243dbe24486d46257bafe130e0c825ca162",
+      "size": 9541,
+      "sha256": "69e048d5d4c7b38349a9a8088386c06cf90104c4168905430d6ca729b99963b5",
       "category": "other"
     },
     {
@@ -1132,6 +1144,12 @@
       "path": "vendor/llama-windows/llama-b12556-bin-win-cuda-12.4-x64.zip",
       "size": 364747106,
       "sha256": "e18df7a7189e1446ca338aa4f04529acb4dce7537164baed2fbc624e48864932",
+      "category": "other"
+    },
+    {
+      "path": "vendor/llama-windows/llama-b12556-bin-win-cuda-13.5-x64.zip",
+      "size": 229295176,
+      "sha256": "dde6d3f922b2225574ba32fe4bad227fb4784a8a5ebabc78c69fb3da7979ae23",
       "category": "other"
     },
     {

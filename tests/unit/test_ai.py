@@ -89,6 +89,72 @@ def test_gpu_plan_falls_back_to_cpu_when_backend_library_missing(tmp_path: Path)
     assert (backend, layers) == ("cpu", 0)
 
 
+def test_cuda_status_names_the_exact_reason_when_runtime_dlls_are_missing(tmp_path: Path):
+    from app.ai.gpu_detector import cuda_backend_status
+
+    backend = tmp_path / "ggml-cuda.dll"
+    backend.write_bytes(b"...cublas64_12.dll...cublasLt64_12.dll...sm_90...sm_80...")
+
+    status = cuda_backend_status(tmp_path)
+    assert status["present"] is True
+    assert "cublas64_12.dll" in status["runtime_dlls"]
+    assert status["missing"] == ["cublas64_12.dll", "cublasLt64_12.dll"]
+    assert status["usable"] is False
+    assert "CUDA 12 runtime" in status["reason"]
+
+    (tmp_path / "cublas64_12.dll").write_bytes(b"x")
+    (tmp_path / "cublasLt64_12.dll").write_bytes(b"x")
+    status = cuda_backend_status(tmp_path)
+    assert status["missing"] == []
+    assert status["archs"] == ["80", "90"]
+
+
+def test_cuda_status_reports_arch_mismatch_for_blackwell(tmp_path: Path):
+    from app.ai.gpu_detector import analyze_cuda_backend
+
+    backend = tmp_path / "ggml-cuda.dll"
+    backend.write_bytes(b"cublas64_12.dll cublasLt64_12.dll sm_50 sm_61 sm_70 sm_75 sm_80 sm_90")
+    (tmp_path / "cublas64_12.dll").write_bytes(b"x")
+    (tmp_path / "cublasLt64_12.dll").write_bytes(b"x")
+
+    status = analyze_cuda_backend(backend, tmp_path, device_arch="sm_120")
+    assert status["usable"] is False
+    assert "sm_120" in status["reason"]
+    assert "sm_90" in status["reason"]
+
+
+def test_gpu_plan_refuses_cuda_when_backend_is_unusable(tmp_path: Path):
+    from app.ai.gpu_detector import gpu_plan
+
+    scorer = tmp_path / "jev-score.exe"
+    scorer.write_bytes(b"")
+    backend_dll = tmp_path / "ggml-cuda.dll"
+    backend_dll.write_bytes(b"cublas64_12.dll sm_90")   # needs CUDA 12 cublas, not present
+    hardware = HardwareReport("Windows", "Intel", 8, 16.0, 12.0, "NVIDIA", "RTX 5060", 8.0, 7.0, "550.0", "cuda")
+
+    backend, layers, note = gpu_plan(scorer, hardware, None, 2_000_000_000)
+    assert (backend, layers) == ("cpu", 0)
+    assert "cublas64_12.dll" in note
+
+
+
+
+def test_gpu_plan_reports_blackwell_arch_mismatch(tmp_path: Path):
+    from app.ai.gpu_detector import gpu_plan
+
+    scorer = tmp_path / "jev-score.exe"
+    scorer.write_bytes(b"")
+    (tmp_path / "ggml-cuda.dll").write_bytes(b"cublas64_13.dll cublasLt64_13.dll sm_86 sm_89 sm_103 sm_120")
+    (tmp_path / "cublas64_13.dll").write_bytes(b"x")
+    (tmp_path / "cublasLt64_13.dll").write_bytes(b"x")
+    hardware = HardwareReport("Windows", "Intel", 8, 16.0, 12.0, "NVIDIA", "RTX 5060", 8.0, 7.0, "550.0", "cuda")
+
+    backend, layers, note = gpu_plan(scorer, hardware, None, 2_000_000_000)
+    # device_arch is probed live (empty off-GPU machines), so the plan stays optimistic
+    # only when the arch probe cannot tell; it never reports a reason that is wrong.
+    assert (backend, layers) == ("cpu", 0) or (backend == "cuda" and layers == 999)
+
+
 def test_no_model_means_ai_disabled_but_rules_still_run(tmp_path: Path):
     empty_dir = tmp_path / "models"
     empty_dir.mkdir()

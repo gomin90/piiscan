@@ -189,6 +189,7 @@ class JevStyleAdapter:
         self.peak_rss_mb = 0.0
         self.last_error: str | None = None
         self.scorer_info: dict = {}
+        self.gpu_report: dict = {}
 
     # -------------------------------------------------------------- lifecycle
     def load(self) -> bool:
@@ -249,6 +250,28 @@ class JevStyleAdapter:
                     f"scorer binary was built without GPU support ({self.spec.scorer_path}); "
                     "rebuild with GGML_CUDA/-metal to use the GPU"
                 )
+            gpu_report = self.scorer_info.get("gpu") or {}
+            self.gpu_report = gpu_report
+            layers_on_gpu = gpu_report.get("layers_on_gpu", "cpu")
+            if backend != "cpu":
+                if not gpu_report.get("gpu_backend_present"):
+                    backend = "cpu"
+                    gpu_layers = 0
+                    gpu_note = (
+                        "no GPU backend could be loaded by llama.cpp "
+                        + (gpu_report.get("backend_log") or "(no backend log)")
+                        + " -> CPU inference"
+                    )
+                elif layers_on_gpu == "cpu" or layers_on_gpu.startswith("0/"):
+                    backend = "cpu"
+                    gpu_layers = 0
+                    gpu_note = (
+                        f"GPU backend present but 0 layers offloaded (requested ngl {gpu_report.get('requested_ngl')}) "
+                        + (": " + (gpu_report.get("backend_log") or "").strip() if gpu_report.get("backend_log") else "")
+                        + " -> CPU inference"
+                    )
+                else:
+                    gpu_note = f"layers on GPU: {layers_on_gpu}"
         except Exception as exc:  # 모델 로드/scorer 초기화 실패 -> 규칙 기반 유지
             self.status = f"Jev-Style 모델 로드 실패 -> 규칙 결과만 사용: {exc}"
             self.last_error = str(exc)
@@ -257,6 +280,7 @@ class JevStyleAdapter:
 
         self.backend = backend
         self.gpu_layers = gpu_layers
+        self.gpu_report = self.scorer_info.get("gpu") or {}
         self.status = f"로드 완료 ({self.spec.model_name}, {self.spec.quant}, {backend} backend)"
         if gpu_note:
             self.status += f" ({gpu_note})"
@@ -419,6 +443,8 @@ class JevStyleAdapter:
             "backend": self.backend,
             "gpu_layers": getattr(self, "gpu_layers", 0),
             "gpu_backend": getattr(self.hardware, "gpu_backend_ready", False),
+            "layers_on_gpu": (getattr(self, "gpu_report", {}) or {}).get("layers_on_gpu", "cpu"),
+            "gpu_devices": (getattr(self, "gpu_report", {}) or {}).get("gpu_devices", []),
             "load_seconds": round(self.load_seconds, 2),
             "inference_seconds": round(self.inference_seconds, 3),
             "decisions": self.decisions,

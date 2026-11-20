@@ -14,39 +14,62 @@
       "model": "Jev-Style-0.8B-Decision-v3",
       "protocol": "jev-score",
       "source": "models/jev-style/0.8b-v3/jev_score.cpp",
-      "toolchain": "x86_64-w64-mingw32-g++ 14.0.0 (MinGW-w64), -O2 -static, built on macOS 15 Apple Silicon",
+      "toolchain": "x86_64-w64-mingw32-g++ 16.2.0 (MinGW-w64), -O2, built on macOS 15 Apple Silicon",
       "linked_against": [
         "llama.dll",
         "ggml.dll",
         "ggml-base.dll"
       ],
-      "sha256": "6ab05178af3fca18a802b748cdeee6ef54bef6ea4aa16d81e128a3b1f2f68972",
-      "size_bytes": 13241936,
-      "execution_status": "NOT executed on Windows. PE format and import table verified with objdump. Must be validated on a Windows PC by scripts/windows/verify-offline-bundle.ps1."
+      "sha256": "dba29b5bae82065b89690caea42151b657eb0843d41c27528b03e6d1dad7e304",
+      "size_bytes": 13453976,
+      "execution_status": "NOT executed on Windows. PE format and import table verified with objdump. Must be validated on a Windows PC by scripts/windows/verify-offline-bundle.ps1.",
+      "gpu_diagnostics": "ready JSON now includes a gpu field: requested_ngl, gpu_backend_present, layers_on_gpu, gpu_devices, backend_log"
     },
     "jev-score-v2.exe": {
       "model": "Jev-Style-2B-Decision-v4",
       "protocol": "jev-score-v2",
       "source": "models/jev-style/2b-v4/jev_score_v2.cpp",
-      "toolchain": "x86_64-w64-mingw32-g++ 14.0.0 (MinGW-w64), -O2 -static, built on macOS 15 Apple Silicon",
+      "toolchain": "x86_64-w64-mingw32-g++ 16.2.0 (MinGW-w64), -O2, built on macOS 15 Apple Silicon",
       "linked_against": [
         "llama.dll",
         "ggml.dll",
         "ggml-base.dll"
       ],
-      "execution_status": "NOT executed on Windows. PE format and import table verified with objdump. Must be validated on a Windows PC by scripts/windows/verify-offline-bundle.ps1."
+      "execution_status": "NOT executed on Windows. PE format and import table verified with objdump. Must be validated on a Windows PC by scripts/windows/verify-offline-bundle.ps1.",
+      "sha256": "6338f672ffba61dcaadc438560a9f1e9a69b651ea85c13ffea712d87f84d6460",
+      "size_bytes": 13460861,
+      "gpu_diagnostics": "ready JSON now includes a gpu field: requested_ngl, gpu_backend_present, layers_on_gpu, gpu_devices, backend_log"
     }
   },
   "gpu_backends": {
+    "cuda_13_5_x64": {
+      "asset": "https://github.com/ggml-org/llama.cpp/releases/download/b12556/llama-b12556-bin-win-cuda-13.5-x64.zip",
+      "size_bytes": 229295176,
+      "sha256": "dde6d3f922b2225574ba32fe4bad227fb4784a8a5ebabc78c69fb3da7979ae23",
+      "vendored_at": "vendor/llama-windows/llama-b12556-bin-win-cuda-13.5-x64.zip",
+      "ggml_cuda_dll_bytes": 220921856,
+      "cuda_runtime_dlls_imported": ["cublas64_13.dll", "cublasLt64_13.dll"],
+      "compiled_gpu_archs": ["sm_86", "sm_89", "sm_103", "sm_120", "sm_121"],
+      "use_for": "Blackwell (RTX 50xx = sm_120) and CUDA 13.x machines",
+      "status": "downloaded and inspected (size/hash/arch list verified with objdump); NOT executed on Windows"
+    },
     "cuda_12_4_x64": {
       "asset": "https://github.com/ggml-org/llama.cpp/releases/download/b12556/llama-b12556-bin-win-cuda-12.4-x64.zip",
       "size_bytes": 364747106,
       "sha256": "e18df7a7189e1446ca338aa4f04529acb4dce7537164baed2fbc624e48864932",
-      "contains": "ggml-cuda.dll (789 MB) + ggml-cpu-* + llama.dll",
-      "cuda_runtime_asset": "https://github.com/ggml-org/llama.cpp/releases/download/b12556/cudart-llama-bin-win-cuda-13.4-x64.zip",
-      "how_to_use": "Run scripts/windows/fetch-cuda-backend.ps1 once on a connected machine, copy the DLLs into runtime/windows/, then run fully offline.",
-      "status": "availability verified (asset exists, size/hash recorded). RTX 5060 / CUDA execution is NOT verified."
+      "vendored_at": "vendor/llama-windows/llama-b12556-bin-win-cuda-12.4-x64.zip",
+      "ggml_cuda_dll_bytes": 789349376,
+      "cuda_runtime_dlls_imported": ["cudart64_12.dll", "cublas64_12.dll", "cublasLt64_12.dll"],
+      "compiled_gpu_archs": ["sm_50", "sm_61", "sm_70", "sm_75", "sm_80", "sm_90"],
+      "use_for": "Maxwell..Hopper GPUs with a CUDA 12.x runtime",
+      "blackwell_note": "llama.cpp requires CUDA >= 12.8 for sm_120 kernels; this build has none, and it needs the CUDA 12 DLLs a CUDA 13 install does not provide",
+      "status": "availability verified (asset exists, size/hash recorded). RTX 5060 / CUDA execution is NOT verified"
     }
+  },
+  "gpu_backend_loading": {
+    "mechanism": "ggml-base.dll dynamically loads ggml-<backend>.dll. llama.cpp official builds do not set GGML_BACKEND_DIR, so the search order is the executable's own directory, then the current working directory; GGML_BACKEND_PATH is the only override.",
+    "consequence": "ggml-cuda.dll must be copied into runtime/windows (next to jev-score.exe). Putting it on PATH does nothing.",
+    "exe_dependency_check": "jev-score.exe and jev-score-v2.exe import only KERNEL32/api-ms-win-crt-*, ggml-base.dll, ggml.dll, llama.dll. GPU support is never compiled into the EXE; it comes from the backend DLL."
   },
   "runtime_dlls": [
     "llama.dll",
@@ -71,8 +94,7 @@
   "built_at": "2026-11-20",
   "files": {
     "BUILD-INFO.json": {
-      "size": 3194,
-      "sha256": "e4cdaa34c379fea620d98a032fc065985c03d28c3548459792cd8d4e42b9797e"
+      "note": "hash is regenerated by scripts/build_windows_runtime.py when the bundle is built"
     },
     "ggml-base.dll": {
       "size": 840704,
@@ -139,12 +161,12 @@
       "sha256": "a2d48a3a177ff603119364e70fde7d3239170af12e4621ab67db9ccd86c8863f"
     },
     "jev-score-v2.exe": {
-      "size": 13251363,
-      "sha256": "647b27e38815801c4c75636a4b357c77772cbd4ccf325bbbf26b5780c5f87773"
+      "size": 13460861,
+      "sha256": "6338f672ffba61dcaadc438560a9f1e9a69b651ea85c13ffea712d87f84d6460"
     },
     "jev-score.exe": {
-      "size": 13241936,
-      "sha256": "6ab05178af3fca18a802b748cdeee6ef54bef6ea4aa16d81e128a3b1f2f68972"
+      "size": 13453976,
+      "sha256": "dba29b5bae82065b89690caea42151b657eb0843d41c27528b03e6d1dad7e304"
     },
     "libomp.dll": {
       "size": 856064,
@@ -157,6 +179,17 @@
     "llama.dll": {
       "size": 3955200,
       "sha256": "a07715b34b90dd9263a5629890c88ba74464d41a17e24ac117883d4707d9e4d7"
+    }
+  },
+  "cuda_findings": {
+    "rtx_5060_laptop": {
+      "compute_capability": "sm_120 (Blackwell) - not measured on this machine, taken from llama.cpp arch table",
+      "why_gpu_is_ignored": [
+        "the bundled CUDA backend is the CUDA 12.4 build: its ggml-cuda.dll imports cudart64_12.dll/cublas64_12.dll/cublasLt64_12.dll, which a CUDA 13.3 install does not provide",
+        "that build contains device code only for sm_50..sm_90, so it has no kernels for sm_120 (llama.cpp requires CUDA >= 12.8 for Blackwell)",
+        "ggml-cuda.dll must sit in the same directory as jev-score.exe (or the CWD, or GGML_BACKEND_PATH); being on PATH is not enough"
+      ],
+      "fix": "scripts/windows/install-cuda-backend.ps1 picks the CUDA 13.5 asset for sm_100+ GPUs; verify with scripts/windows/gpu-check.ps1"
     }
   }
 }
