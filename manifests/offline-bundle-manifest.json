@@ -1,8 +1,8 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-20T04:41:28.999156+00:00",
+  "generated_at": "2026-11-20T04:51:15.958985+00:00",
   "git": {
-    "commit": "a3fd1130353c5a8293707b5a1fdb37f29324609e",
+    "commit": "53b9eb61d2b739dcb63d9f339e448db48839e1d0",
     "branch": "main",
     "repository": ""
   },
