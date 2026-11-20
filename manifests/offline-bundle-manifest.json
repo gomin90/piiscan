@@ -1,11 +1,11 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-20T05:12:35.854018+00:00",
+  "generated_at": "2026-11-20T05:52:54.544046+00:00",
   "git": {
-    "commit": "6b032d6dbf71427b5a8032976a604b28843f93e0",
+    "commit": "cbadc80bed7bf418c14fd2a1f87e4fd8d91aca7d",
     "branch": "main",
     "repository": "https://github.com/gomin90/piiscan.git",
-    "generated_at": "2026-11-20T05:12:35.890408+00:00"
+    "generated_at": "2026-11-20T05:52:54.580681+00:00"
   },
   "target": {
     "windows": {
@@ -32,9 +32,9 @@
       "scorer": "jev_score_v2.cpp"
     }
   },
-  "file_count": 212,
-  "total_bytes": 2397382360,
-  "total_mb": 2286.3,
+  "file_count": 216,
+  "total_bytes": 2422980137,
+  "total_mb": 2310.7,
   "files": [
     {
       "path": ".gitattributes",
@@ -57,7 +57,7 @@
     {
       "path": "README.md",
       "size": 5516,
-      "sha256": "d41be07407b88bf1b893e2f8fe5ab7cddc39001fe803b679beb5cbf8a9dd9ee6",
+      "sha256": "6dd8d2d1f4e5d6e14c08835e4de1fc29b0959dc3ce16527709e9107221aa403d",
       "category": "other"
     },
     {
@@ -452,8 +452,8 @@
     },
     {
       "path": "docs/jev-style-report.md",
-      "size": 21091,
-      "sha256": "303b52217fdf274303bd8b88bc38bdb8d41b7324487082ee3e7e0f1da77d0875",
+      "size": 21146,
+      "sha256": "183ce65390edafbf6311c510511f59874b38d92af8834402b1bd31e626c85cb1",
       "category": "docs"
     },
     {
@@ -476,8 +476,8 @@
     },
     {
       "path": "docs/windows-test-guide.md",
-      "size": 8132,
-      "sha256": "9711cfcfa1470268f4c3670e7d3bda0cb7af41a2b315ea4a887ea6b06b24c6bd",
+      "size": 9105,
+      "sha256": "3ce930d915561ef2e969fd043d172468a29a3dd585f29529da8bd8383805e392",
       "category": "docs"
     },
     {
@@ -656,14 +656,14 @@
     },
     {
       "path": "requirements/requirements-lock.txt",
-      "size": 4066,
-      "sha256": "546ccb6d46a8ef0b9e1e9990144c60ffaa177c67591cb53477e441df7ef8cf4c",
+      "size": 4548,
+      "sha256": "c98cdfd4867145f10b0d87ba95d034468f8a09de2334ff52e6e35ddb8e5904e3",
       "category": "requirements"
     },
     {
       "path": "requirements/requirements-win.txt",
-      "size": 819,
-      "sha256": "8bdb2eefec5fe73ac345bb9ab08b4f4494a1f39c65d1e4d835a8043a932fe4ac",
+      "size": 887,
+      "sha256": "b21cbe78fcc55ea555879e935459c32ba13c2e15f4fdbbb5d417496d46e58f93",
       "category": "requirements"
     },
     {
@@ -848,8 +848,8 @@
     },
     {
       "path": "scripts/windows/install-offline.ps1",
-      "size": 1570,
-      "sha256": "a818c5e00c1842a7dce0a5ee70e539e595f197c6005aebd2de46a94ccacf7463",
+      "size": 2852,
+      "sha256": "5935196a6df85093cc9d76075384bda63cf19c96062a59267e0feb1cfba0a223",
       "category": "scripts"
     },
     {
@@ -950,8 +950,8 @@
     },
     {
       "path": "tests/qa/test_offline_bundle.py",
-      "size": 5709,
-      "sha256": "dd095df67f1b1c0d394e50021e85d4d08cd16ee6b848a465e2bbd8f46c45c5ff",
+      "size": 6210,
+      "sha256": "1fa15c0ba628e24ef7fb343a4c0905a50dab67932bfb5723268818b2985cba06",
       "category": "other"
     },
     {
@@ -1207,6 +1207,18 @@
       "category": "wheelhouse"
     },
     {
+      "path": "vendor/wheels/numpy-2.5.5-cp313-cp313-win_amd64.whl",
+      "size": 12573354,
+      "sha256": "e0608d1585557b68dcb6a70a41654f7536567960afad79d91752d2863b242b68",
+      "category": "wheelhouse"
+    },
+    {
+      "path": "vendor/wheels/numpy-2.5.5-cp314-cp314-win_amd64.whl",
+      "size": 12710543,
+      "sha256": "20145b11776d2f7570cd61351b156a51d3a341822282095baa819d87272bc710",
+      "category": "wheelhouse"
+    },
+    {
       "path": "vendor/wheels/packaging-26.3-py3-none-any.whl",
       "size": 129956,
       "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
@@ -1270,6 +1282,18 @@
       "path": "vendor/wheels/pyyaml-6.0.3-cp312-cp312-win_amd64.whl",
       "size": 154003,
       "sha256": "5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b",
+      "category": "wheelhouse"
+    },
+    {
+      "path": "vendor/wheels/pyyaml-6.0.3-cp313-cp313-win_amd64.whl",
+      "size": 154090,
+      "sha256": "79005a0d97d5ddabfeeea4cf676af11e647e41d81c9a7722a193022accdb6b7c",
+      "category": "wheelhouse"
+    },
+    {
+      "path": "vendor/wheels/pyyaml-6.0.3-cp314-cp314-win_amd64.whl",
+      "size": 156429,
+      "sha256": "4a2e8cebe2ff6ab7d1050ecd59c25d4c8bd7e6f400f5f82b96557ac0abafd0ac",
       "category": "wheelhouse"
     },
     {

@@ -350,7 +350,7 @@ verified-on-macOS **bundle** plus the scripts the user runs on Windows.
 
 | Artifact | How it was produced | Evidence available | Executed on Windows? |
 |---|---|---|---|
-| `vendor/wheels/` (31 wheels, 104.8 MB) | `pip download --platform win_amd64 --only-binary=:all: --python-version 3.12` | `requirements/requirements-lock.txt` (name, size, SHA256); `tools/verify_wheelhouse.py` proves the dependency closure | no |
+| `vendor/wheels/` (35 wheels, 129.2 MB) | `pip download --platform win_amd64 --only-binary=:all:` for CPython 3.12/3.13/3.14 (`numpy` and `PyYAML` shipped for all three tags) | `requirements/requirements-lock.txt` (name, size, SHA256); `tools/verify_wheelhouse.py` proves the dependency closure | no |
 | `models/jev-style/0.8b-v3` / `2b-v4` GGUF + tokenizer | `tools/jev_download_models.py` with the already-authenticated Hugging Face CLI | `manifest.json` per release (repo, revision, SHA256, size, licence) | no (loaded on macOS) |
 | `runtime/windows/jev-score.exe`, `jev-score-v2.exe` | MinGW 14.0.0 cross-compile of the official `jev_score.cpp` / `jev_score_v2.cpp`, `-static`, linked against the official `llama.dll` | PE header + import table inspected with `objdump`: only non-system import is `llama.dll`; `BUILD-INFO.json` records every hash | **no** |
 | `runtime/windows/llama.dll`, `ggml*.dll`, `libomp.dll` (18 files) | official llama.cpp `b12556` `bin-win-cpu-x64` asset | SHA256 in `BUILD-INFO.json` and in the bundle manifest | no |

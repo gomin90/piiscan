@@ -76,7 +76,7 @@ python tools/make_release_bundle.py          # dist/piiscan-offline-bundle.zip
 app/{core,detectors,ai,ui,export,utils,config}
 models/jev-style/{0.8b-v3,2b-v4}/   GGUF + tokenizer + scorer source + manifests
 runtime/windows/                    jev-score.exe, jev-score-v2.exe, llama.cpp DLLs
-vendor/wheels/                      offline win_amd64 wheelhouse (31 wheels, 105 MB)
+vendor/wheels/                      offline win_amd64 wheelhouse (35 wheels, 129 MB)
 resources/rules                     user-configurable custom patterns
 scripts/windows/                    diagnose / verify / install / build / run
 tools/                              build.py, qa_*, jev_*, benchmark.py

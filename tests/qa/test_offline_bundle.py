@@ -107,6 +107,16 @@ def test_windows_sample_is_synthetic() -> None:
                and "example" in domain for domain in (e.split("@")[1] for e in emails)), emails
 
 
+def test_python_version_coverage_of_the_wheelhouse() -> None:
+    """install-offline.ps1 accepts CPython 3.12/3.13/3.14; the wheels it needs must exist."""
+    wheels = {w.name for w in WHEEL_DIR.glob("*.whl")}
+    for tag in ("cp312", "cp313", "cp314"):
+        for package in ("numpy", "pyyaml"):
+            assert any(w.startswith(package + "-") and tag in w for w in wheels), (
+                f"no {package} wheel for {tag}; install-offline.ps1 would fail on Python 3.{tag[2:]}"
+            )
+
+
 def test_model_manifest_records_provenance() -> None:
     for release in ("0.8b-v3", "2b-v4"):
         release_dir = ROOT / "models" / "jev-style" / release

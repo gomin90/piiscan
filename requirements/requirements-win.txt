@@ -1,5 +1,6 @@
 # Exact pins for the Windows offline wheelhouse (vendor/wheels).
-# Python 3.12 x64. Install without network:
+# Python 3.12 / 3.13 / 3.14 x64 (numpy and PyYAML wheels are shipped for all three).
+# Install without network:
 #   python -m pip install --no-index --find-links vendor/wheels -r requirements/requirements-win.txt
 #
 # PySide6_Essentials is used instead of the full PySide6 metapackage:

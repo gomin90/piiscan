@@ -42,7 +42,7 @@ Unzip **all three parts into the same folder** (they share one directory tree), 
 run the integrity check in section 2. Built with `python tools/make_release_bundle.py --split`.
 
 - Windows 10/11 x64
-- Python 3.12 x64 (EXE 없이 source 실행 시) — 3.11 also works, but the wheelhouse is pinned for 3.12
+- Python 3.12 / 3.13 / 3.14 x64 (EXE 없이 source 실행 시) — `numpy`과 `PyYAML` wheel이 세 태그(cp312/cp313/cp314) 모두 들어 있다
 - 8GB RAM 권장 (0.8B model), 16GB+이면 2B model comparison 가능
 
 ```powershell
@@ -187,3 +187,12 @@ score purely from local files.
   on the actual GPU.
 - 8GB RAM: 2B model (3.7GB peak RSS on macOS CPU) may exceed the limit; the adapter
   aborts AI and continues with rule-based analysis when available RAM is too low.
+
+## 9. Troubleshooting (실제 발생 오류)
+
+| 오류 | 원인 | 해결 |
+|---|---|---|
+| `ModuleNotFoundError: No module named 'numpy'` | 의존성 설치 단계(§3)를 실행하지 않았거나, Python minor version이 wheelhouse(cp312/313/314)와 다를 | `python --version` 확인 → `powershell -ExecutionPolicy Bypass -File scripts\windows\install-offline.ps1` 재실행. 스크립트가 minor version을 검사하고Missing wheel을 명시적으로报错 |
+| `No module named 'PySide6'` | same as numpy | `install-offline.ps1` 후 `python -c "import PySide6, numpy, psutil, tokenizers, yaml"` |
+| `jev-score.exe` exits non-zero / DLL error | MinGW cross-built binary + MSVC `llama.dll` | `build-jev-score.ps1`로 MSVC native rebuild, or VC++ Redistributable install |
+| `pip install` says "no matching distribution" | Python minor 버전 불匹配 | cp312 / cp313 / cp314 win_amd64 wheel 중 해당 interpreter를 설치 |
