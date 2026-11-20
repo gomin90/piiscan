@@ -1,11 +1,11 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-20T05:56:58.767172+00:00",
+  "generated_at": "2026-11-20T09:08:18.563206+00:00",
   "git": {
-    "commit": "b8bd0cf693c81602a37324276b53f09d273337de",
+    "commit": "aac20853f48e6067f4835f0999e2095b96c283b5",
     "branch": "main",
     "repository": "https://github.com/gomin90/piiscan.git",
-    "generated_at": "2026-11-20T05:56:58.804676+00:00"
+    "generated_at": "2026-11-20T09:08:18.598463+00:00"
   },
   "target": {
     "windows": {
@@ -33,7 +33,7 @@
     }
   },
   "file_count": 216,
-  "total_bytes": 2422980137,
+  "total_bytes": 2422981715,
   "total_mb": 2310.7,
   "files": [
     {
@@ -374,8 +374,8 @@
     },
     {
       "path": "app/ui/file_selector.py",
-      "size": 2351,
-      "sha256": "bbf5e77ce11012c54a98ed32aa11cdd648a474bd2b4cbe555ae19d4f824ed24e",
+      "size": 2822,
+      "sha256": "c9c87a1daef029917ccba02829fed6ca0038c67ac182296c34ca3afacd289dfc",
       "category": "app"
     },
     {
@@ -932,8 +932,8 @@
     },
     {
       "path": "tests/qa/test_gui_headless.py",
-      "size": 3109,
-      "sha256": "75dc8927878df0f8988d81684f47579d3dc4fbd17d01eb7559a8782579e54839",
+      "size": 4216,
+      "sha256": "bce43ea5c6a007dcf44e15d34d78108536f14d4519a9047508349abbca3165fe",
       "category": "other"
     },
     {

@@ -22,8 +22,14 @@ class FileSelector(QWidget):
         self.files: list[Path] = []
         layout = QVBoxLayout(self)
         row = QHBoxLayout()
-        row.addWidget(QPushButton("CSV 파일 선택"))
-        row.addWidget(QPushButton("폴더 선택"))
+        self.file_button = QPushButton("CSV 파일 선택")
+        self.folder_button = QPushButton("폴더 선택")
+        # Without these connections the buttons are inert and no file can be
+        # picked from the GUI.
+        self.file_button.clicked.connect(self.choose_files)
+        self.folder_button.clicked.connect(self.choose_folder)
+        row.addWidget(self.file_button)
+        row.addWidget(self.folder_button)
         layout.addLayout(row)
         self.list_widget = QListWidget()
         layout.addWidget(self.list_widget)
@@ -45,11 +51,14 @@ class FileSelector(QWidget):
         folder = QFileDialog.getExistingDirectory(self, "폴더 선택")
         if not folder:
             return
-        self.files = sorted(Path(folder).glob("*.csv"))
+        base = Path(folder)
+        self.files = sorted({p for pattern in ("*.csv", "*.txt") for p in base.glob(pattern)})
         self.list_widget.clear()
         for path in self.files:
             self.list_widget.addItem(self._describe(path))
-        self.info_label.setText(f"{len(self.files)}개 CSV 파일 선택됨")
+        self.info_label.setText(
+            f"{len(self.files)}개 파일 선택됨" if self.files else "선택한 폴더에 CSV/TXT 파일 없음"
+        )
 
     @staticmethod
     def _describe(path: Path) -> str:

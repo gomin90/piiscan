@@ -88,3 +88,32 @@ def test_debug_off_leaves_diagnostics_empty(app, gui_csv, tmp_path, monkeypatch)
     window.run_analysis()
     assert window.diagnostics == []
     assert "디버그 정보 없음" in window.debug_label.text()
+
+def test_file_and_folder_buttons_reach_the_choosers(app, gui_csv, tmp_path, monkeypatch):
+    """The CSV/folder buttons must actually invoke the file dialogs."""
+    from PySide6.QtWidgets import QFileDialog
+
+    from app.ui.file_selector import FileSelector
+
+    calls: list[str] = []
+
+    def fake_open_files(*args, **kwargs):
+        calls.append("open_files")
+        return [str(gui_csv)], ""
+
+    def fake_directory(*args, **kwargs):
+        calls.append("directory")
+        return str(tmp_path)
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileNames", staticmethod(fake_open_files))
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(fake_directory))
+
+    selector = FileSelector()
+    selector.file_button.click()
+    assert selector.files == [gui_csv], "CSV button did not register the chosen file"
+    assert selector.list_widget.count() == 1
+
+    selector.folder_button.click()
+    assert gui_csv in selector.files, "folder button did not register the folder contents"
+    assert "선택됨" in selector.info_label.text()
+    assert calls == ["open_files", "directory"]
