@@ -375,9 +375,17 @@ Cell recall를 줄이지 않는다 (test `test_ai_off_and_selective_ai_find_the_
 
 Rule-only wall time (FakeScorer): A 0.98 s, B 1.51 s, C 7.59 s, D 7.09 s, E 62.30 s, F 6.75 s.
 
-AI inference with the **real** Jev-Style 0.8B scorer (Metal):
-* D (1,000 x 1,000): 200 column + 100 row judgements = 300 inferences, 58.7 s AI, 68.7 s total, RSS +303 MB
-* E (1,000 x 10,000): 300 inferences, 39.4 s AI, 103.7 s total, RSS +139.5 MB, store 377.5 MB
+AI inference with the **real** Jev-Style 0.8B scorer (Metal), scenario C (100 x 10,000):
+
+| column-review policy | AI column calls | AI time | total time | Cell hits | Cell P/R/F1 |
+|---|---|---|---|---|---|
+| all (pre-v0.5 behaviour, cap 10,000) | 2,000 | 335.8 s | 345.1 s | 200,000 | 1.00/1.00/1.00 |
+| selective + cap 200 (default) | 200 | 39.1 s | 48.0 s | 200,000 | 1.00/1.00/1.00 |
+| none | 0 | 6.1 s | 15.0 s | 200,000 | 1.00/1.00/1.00 |
+
+The AI workload drops 10x while the rule-detected Cell count and precision/recall are
+identical. Other real-scorer runs: D (1,000 x 1,000) 300 inferences, 58.7 s AI, 68.7 s
+total, RSS +303 MB; E (1,000 x 10,000) 300 inferences, 39.4 s AI, 103.7 s total, store 377.5 MB.
 
 ### 9.3 Memory before/after (scenario E, rules only, separate processes)
 

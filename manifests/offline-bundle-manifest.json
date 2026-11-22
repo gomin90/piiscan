@@ -1,11 +1,11 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-22T17:58:48.113735+00:00",
+  "generated_at": "2026-11-22T18:18:18.115494+00:00",
   "git": {
-    "commit": "d655e59dead093d51f795fc8770e985f4a363c34",
+    "commit": "d83860a498ebc1990abb36a5483414590ba25a24",
     "branch": "main",
     "repository": "https://github.com/gomin90/piiscan.git",
-    "generated_at": "2026-11-22T17:58:48.146755+00:00"
+    "generated_at": "2026-11-22T18:18:18.148313+00:00"
   },
   "target": {
     "windows": {
@@ -33,7 +33,7 @@
     }
   },
   "file_count": 230,
-  "total_bytes": 2652915574,
+  "total_bytes": 2652916606,
   "total_mb": 2530.0,
   "files": [
     {
@@ -57,7 +57,7 @@
     {
       "path": "README.md",
       "size": 6482,
-      "sha256": "b84a1673c5be114e0a0114038e087517792734aec3128763fbd54b6fe302cf52",
+      "sha256": "8a8cda790cb30936eca234fccedfc5593c6af7de4d8b587dd54011eb14e030c7",
       "category": "other"
     },
     {
@@ -158,8 +158,8 @@
     },
     {
       "path": "app/core/analysis_service.py",
-      "size": 16983,
-      "sha256": "b6672f4fd2d391cc602be8a8221d112ee630cb62241e3a1e2b98a02e62c24a6a",
+      "size": 17104,
+      "sha256": "f60619000368368d1d545f85e4edfa930cb31784895eeb944166ea46cb502621",
       "category": "app"
     },
     {
@@ -494,8 +494,8 @@
     },
     {
       "path": "docs/qa-verification-report.md",
-      "size": 27693,
-      "sha256": "37f72f57bee60330bac18cb6f6d668449d318e7d72c540442f777ba7582a1008",
+      "size": 28146,
+      "sha256": "909e99eefea021bb8631a56d4b28773d3df7491ef37b187f8411db24fc28c528",
       "category": "docs"
     },
     {
@@ -1010,8 +1010,8 @@
     },
     {
       "path": "tests/qa/test_review_fixes.py",
-      "size": 20743,
-      "sha256": "79a7675560ffe4ee1ca5a024eff464e56ddad33759705c34c10bd9183fc36f1a",
+      "size": 21201,
+      "sha256": "445d68e0fcf3ac126168f0c966b82473b9abde612ead8a586dfead30f52f76ca",
       "category": "other"
     },
     {

@@ -99,6 +99,10 @@ def ai_column_candidates(findings: list[dict], config: AnalysisConfig) -> list[d
     """
     if config.ai_column_reviews == "none":
         return []
+    if config.ai_column_reviews == "all":
+        # Explicit "judge every column" mode: identical to the pre-v0.5 behaviour,
+        # bounded only by max_ai_column_reviews.
+        return [{"finding": finding, "reason": "전부 AI 판단"} for finding in findings]
     candidates = []
     for finding in findings:
         types = finding["types"]
@@ -107,11 +111,8 @@ def ai_column_candidates(findings: list[dict], config: AnalysisConfig) -> list[d
             continue  # no detector evidence at all: nothing for the model to judge
         best = max((t["rule_confidence"] for t in types), default=0.0)
         settled = bool(types) and len(types) == 1 and best >= SETTLED_RULE_CONFIDENCE
-        if config.ai_column_reviews == "all" or not settled:
-            candidates.append({
-                "finding": finding,
-                "reason": "전부 AI 판단" if config.ai_column_reviews == "all" else "규칙 판정 불확실",
-            })
+        if not settled:
+            candidates.append({"finding": finding, "reason": "규칙 판정 불확실"})
     return candidates
 
 

@@ -451,6 +451,14 @@ def test_ai_does_not_overwrite_rule_verdicts(tmp_path: Path):
     result = analyse_file(write_csv_file(tmp_path, "rule.csv", body),
                           AnalysisConfig(use_ai=True, ai_column_reviews="all"), llm=FakeScorer())
     rule_only = analyse_file(write_csv_file(tmp_path, "rule.csv", body), AnalysisConfig(use_ai=False))
-    assert [r.column for r in result.results] == [r.column for r in rule_only.results]
+    rule_columns = {r.column for r in rule_only.results}
+    ai_columns = {r.column for r in result.results}
+    assert rule_columns <= ai_columns, "AI mode dropped a rule-detected column"
     for row in result.results:
-        assert "AI" in row.method or row.rule_decision == row.final_decision
+        if row.hits:  # rule evidence exists -> the rule decision wins
+            assert row.final_decision == row.rule_decision, (row.column, row.final_decision, row.rule_decision)
+            assert row.verdict != "형식 유사(무시)"
+    # AI-only columns are advisory and always flagged for review.
+    for row in result.results:
+        if not row.hits:
+            assert row.requires_review and row.method == "AI(보조)"
