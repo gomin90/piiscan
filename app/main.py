@@ -138,7 +138,7 @@ def run_cli(args) -> int:
             counts.get("detector_calls", 0),
             counts.get("detail_rows_stored", 0),
             counts.get("detail_cells_stored", 0),
-            counts.get("detail_store", ""),
+            counts.get("detail_store_path", ""),
             result.ai_summary.get("decisions", 0),
         )
         audit = result.ai_audit

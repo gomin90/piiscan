@@ -153,7 +153,7 @@ class MainWindow(QWidget):
                     "전체 행 수": result.total_rows,
                     "처리 Cell 수": result.cell_counts.get("cells_inspected", 0),
                     "개인정보 Row 수": f"{result.cell_counts.get('detail_rows_stored', 0):,} (RAM 캐시 {result.cell_counts.get('detail_cache_rows', 0):,})",
-                    "상세 Cell 저장": f"{result.cell_counts.get('detail_cells_stored', 0):,}",
+                    "Cell 상세 저장": f"{result.cell_counts.get('detail_cells_stored', 0):,} (RAM 캐시 {result.cell_counts.get('detail_cache_cells', 0):,} Cell)",
                     "AI 판단(컬럼)": str(result.ai_audit.get("attempts", 0)),
                     "AI 판단(Row)": str(result.ai_audit.get("row", {}).get("attempts", 0)),
                     "탐지된 개인정보 유형": len({r.privacy_type for r in result.results}),

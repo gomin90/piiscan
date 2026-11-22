@@ -261,6 +261,7 @@ class DetailStore:
             "detail_cells_stored": self.cell_count,
             "raw_cell_hits": self.raw_cell_count,
             "detail_store_bytes": self.path.stat().st_size if self.path.exists() else 0,
+            "detail_store_path": str(self.path),
         }
 
     def close(self) -> None:

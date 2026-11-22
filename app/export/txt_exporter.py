@@ -57,7 +57,7 @@ def write_txt(file_results: list, output: str | Path) -> str:
         lines.append(
             f"  상세 저장: Row {counts.get('detail_rows_stored', 0):,} / Cell {counts.get('detail_cells_stored', 0):,} "
             f"(RAM 캐시 {counts.get('detail_cache_rows', 0):,} Row, 상한 {counts.get('detail_cache_limit', 0):,}, "
-            f"저장 위치 {counts.get('detail_store', '')})"
+            f"저장 위치 {counts.get('detail_store_path', '')})"
         )
         audit = result.ai_audit
         if audit:

@@ -29,6 +29,7 @@ class AnalysisWindow(QWidget):
             "전체 행 수",
             "처리 Cell 수",
             "개인정보 Row 수",
+            "Row 상세 저장", "Cell 상세 저장", "AI 판단(컬럼)", "AI 판단(Row)",
             "현재 분석 컬럼",
             "탐지된 개인정보 유형",
             "발견된 컬럼 수",

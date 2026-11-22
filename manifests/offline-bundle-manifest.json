@@ -1,11 +1,11 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-22T18:18:18.115494+00:00",
+  "generated_at": "2026-11-22T18:28:42.070328+00:00",
   "git": {
-    "commit": "d83860a498ebc1990abb36a5483414590ba25a24",
+    "commit": "10c2a3f6b4fb345e4dba876caf831eace3004729",
     "branch": "main",
     "repository": "https://github.com/gomin90/piiscan.git",
-    "generated_at": "2026-11-22T18:18:18.148313+00:00"
+    "generated_at": "2026-11-22T18:28:42.102879+00:00"
   },
   "target": {
     "windows": {
@@ -33,7 +33,7 @@
     }
   },
   "file_count": 230,
-  "total_bytes": 2652916606,
+  "total_bytes": 2652916829,
   "total_mb": 2530.0,
   "files": [
     {
@@ -188,8 +188,8 @@
     },
     {
       "path": "app/core/detail_store.py",
-      "size": 12874,
-      "sha256": "16391e37f1457dd348444869667b41c4f2b430cac7fe00da86d0e88acfbce6b0",
+      "size": 12923,
+      "sha256": "66d25fc3a22c0989c0a0d956f5c54483755cb7c281b3da83dcb083f205980fe5",
       "category": "app"
     },
     {
@@ -368,14 +368,14 @@
     },
     {
       "path": "app/export/txt_exporter.py",
-      "size": 7374,
-      "sha256": "32c6b5745b9fb0281407a6b67080bbe646e0d3d20b1928122b003a49e3cfb43d",
+      "size": 7379,
+      "sha256": "f3fcd3bb3e9abac1d2855f301668c94d16121a3f70c86384cee738147e4b5625",
       "category": "app"
     },
     {
       "path": "app/main.py",
-      "size": 9504,
-      "sha256": "fb1c24148892a6a7ffdc615275bf4b0ee92791bffc0772daa476d45577b3dc95",
+      "size": 9509,
+      "sha256": "23e21fab9102ad7df7df6c9e9296b0aa82d3fae132e49c480c03d9628bd5f5bd",
       "category": "app"
     },
     {
@@ -386,8 +386,8 @@
     },
     {
       "path": "app/ui/analysis_window.py",
-      "size": 1951,
-      "sha256": "fd0a99639fb99555bb3dd19bdaa429c5fbbbb0862e30640fd2740651a25dbc58",
+      "size": 2045,
+      "sha256": "fedfb1988e9d58106179929e481fe6764782c1f2314a73b43442cdc5052a2ce2",
       "category": "app"
     },
     {
@@ -398,8 +398,8 @@
     },
     {
       "path": "app/ui/main_window.py",
-      "size": 9219,
-      "sha256": "7dfe703580b2474dfe8a237c99750e79d0f1a42f761c11150233a277bbe87028",
+      "size": 9289,
+      "sha256": "248ca6890f3def6244c28c25e94d89bf9041b94ef94de8a060358dcb111da513",
       "category": "app"
     },
     {
