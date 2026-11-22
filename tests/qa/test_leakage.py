@@ -16,7 +16,7 @@ import pytest
 
 from app.core.analysis_service import analyse_file
 from app.export.csv_exporter import write_csv
-from app.export.hit_exporter import write_hit_rows
+from app.export.hit_exporter import write_hit_rows, write_row_records
 from app.export.txt_exporter import write_txt
 from app.utils.logger import Diagnostics
 
@@ -47,6 +47,11 @@ def build_fixture(path: Path) -> None:
         ["박길동9001022345678", "900102-234567-8", "010-1111-2222",
          "two@leakcorp.example", "5500000000000004", "1234-567890-1234",
          "Busan Canary Avenue 7", "19851113", "-122.419416", "310000000000007"],
+        # Third row is deliberately ambiguous: only review-level evidence, so the
+        # row-context AI path is exercised.
+        ["김**", "199001-******-1", "010-***-5432", "canary*@leakcorp.example",
+         "4111-****-****-1111", "10000***4567", "Seoul Canary St 4*", "1990-01-*",
+         "37.56*", "450123*******12"],
     ]
     with open(path, "w", encoding="utf-8", newline="") as handle:
         handle.write(",".join(header) + "\n")
@@ -127,14 +132,18 @@ def test_exports_contain_no_raw_values(fixture_path: Path, tmp_path: Path):
     csv_path = write_csv([r.as_dict() for r in result.results], tmp_path / "out.csv")
     txt_path = write_txt([result], tmp_path / "out.txt")
     hits_path = write_hit_rows([result], tmp_path / "hits.csv")
+    rows_path = write_row_records([result], tmp_path / "rows.csv")
     text = (Path(csv_path).read_text(encoding="utf-8-sig")
             + Path(txt_path).read_text(encoding="utf-8")
-            + Path(hits_path).read_text(encoding="utf-8-sig"))
+            + Path(hits_path).read_text(encoding="utf-8-sig")
+            + Path(rows_path).read_text(encoding="utf-8-sig"))
     hits = scan(text)
     assert not hits, f"raw personal data in exports: {hits}"
     assert "개인정보" in text
     # the row-level hit file must still carry evidence, just masked
     assert "행" in Path(hits_path).read_text(encoding="utf-8-sig")
+    row_text = Path(rows_path).read_text(encoding="utf-8-sig")
+    assert "행번호" in row_text and "개인정보 존재" in row_text
 
 
 def test_debug_diagnostics_contain_no_raw_values(fixture_path: Path, tmp_path: Path, monkeypatch):
@@ -150,13 +159,19 @@ def test_llm_prompts_contain_no_raw_values(fixture_path: Path):
     prompts: list[str] = []
     analyse_with_prompts(fixture_path, prompts)
     assert prompts, "no LLM prompt was captured"
+    row_prompts = [p for p in prompts if '"rule_basis"' in p]
+    assert row_prompts, "no row-context prompt was captured (Row 문맥 판정 경로)"
     for prompt in prompts:
         hits = scan(prompt)
         assert not hits, f"raw personal data sent to LLM prompt: {hits}\n{prompt[:400]}"
         # Every sample handed to the model must be redacted.
-        sample_block = prompt.split('"masked_samples"')[1]
-        for token in re.findall(r'"([^"]+)"', sample_block)[:5]:
-            if token and not CANARY in token:
+        if '"masked_samples"' in prompt:
+            sample_block = prompt.split('"masked_samples"')[1]
+            tokens = re.findall(r'"([^"]+)"', sample_block)[:5]
+        else:
+            tokens = re.findall(r'"masked_value": "([^"]*)"', prompt)[:8]
+        for token in tokens:
+            if token and CANARY not in token:
                 assert any(ch in token for ch in "*＊xX"), f"unmasked sample in prompt: {token}"
 
 

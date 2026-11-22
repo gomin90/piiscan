@@ -1,4 +1,4 @@
-"""AI 입력 State 설계 ablation: 어떤 state 필드 조합이 판정 정확도를 높이는지实测."""
+"""AI 입력 State 설계 ablation: 어떤 state 필드 조합이 판정 정확도를 높이는지실측."""
 from __future__ import annotations
 
 import json

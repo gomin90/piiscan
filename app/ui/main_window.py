@@ -14,12 +14,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app import __version__
 from app.ai import create_ai_engine
 from app.ai.gpu_detector import detect_hardware
 from app.config.settings import AnalysisConfig
 from app.core.analysis_service import analyse_file
 from app.export.csv_exporter import write_csv
-from app.export.hit_exporter import write_hit_rows
+from app.export.hit_exporter import write_hit_rows, write_row_records
 from app.export.txt_exporter import write_txt
 from app.ui.analysis_window import AnalysisWindow
 from app.ui.file_selector import FileSelector
@@ -32,7 +33,7 @@ from app.utils.logger import Diagnostics, get_logger
 class MainWindow(QWidget):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("개인정보 탐지 및 분석 시스템 (Privacy Scanner)")
+        self.setWindowTitle(f"개인정보 탐지 및 분석 시스템 (Privacy Scanner {__version__})")
         self.resize(1000, 700)
         self.config = AnalysisConfig.load()
         self.hardware = detect_hardware()
@@ -130,8 +131,8 @@ class MainWindow(QWidget):
                 }
             )
             result = analyse_file(path, config, engine, diagnostics=diagnostics,
-                                  progress=lambda done, total: self.progress.update_state(
-                                      **{"처리 행 수": done, "전체 행 수": total}
+                                  progress=lambda done, total, cells=0: self.progress.update_state(
+                                      **{"처리 행 수": done, "전체 행 수": total, "처리 Cell 수": cells}
                                   ))
             results.append(result)
             self.history.append(result)
@@ -150,6 +151,8 @@ class MainWindow(QWidget):
                 **{
                     "처리 행 수": result.rows_parsed,
                     "전체 행 수": result.total_rows,
+                    "처리 Cell 수": result.cell_counts.get("cells_inspected", 0),
+                    "개인정보 Row 수": len(result.row_records),
                     "탐지된 개인정보 유형": len({r.privacy_type for r in result.results}),
                     "발견된 컬럼 수": len({r.column for r in result.results}),
                     "현재 분석 컬럼": max(result.results, key=lambda r: r.hits).column if result.results else "-",
@@ -168,7 +171,9 @@ class MainWindow(QWidget):
                   output_dir / f"privacy_results_{stamp}.csv")
         write_txt(results, output_dir / f"privacy_report_{stamp}.txt")
         write_hit_rows(results, output_dir / f"privacy_hits_{stamp}.csv")
+        write_row_records(results, output_dir / f"privacy_rows_{stamp}.csv")
         self.result_window.show_results([r for result in results for r in result.results])
+        self.result_window.show_rows(results)
         self.diagnostics = diagnostics.events
         if config.debug:
             self.debug_label.setText("\n".join(

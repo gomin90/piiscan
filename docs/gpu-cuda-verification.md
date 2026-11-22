@@ -24,7 +24,7 @@ CUDA 재설치나 파일 삭제 없이, shipped binary의 forensics와 vendored 
 | cuda-13.5 | `cublas64_13.dll`, `cublasLt64_13.dll` (cudart statically linked) | sm_86, sm_89, sm_103, sm_120, sm_121 |
 
 CUDA 12.4 backend은 CUDA 13 계열 환경에서 `cublas64_12.dll`이 resolve되지하면 LoadLibrary 실패,
-ggml backend registry에 CUDA device가注册되지 않고 `llama_supports_gpu_offload() == false` → CPU fallback.
+ggml backend registry에 CUDA device가등록 않고 `llama_supports_gpu_offload() == false` → CPU fallback.
 
 ## 3. Blackwell (RTX 5060) cubin / PTX 포함 여부
 
@@ -52,7 +52,7 @@ GGML_BACKEND_DIR (env, default exe-adjacent) -> exe directory -> CWD -> GGML_BAC
 ```
 
 `PATH`는 search되지 않는다. `ggml-cuda.dll`은 exe와 같은 폴더에 있거나 `GGML_BACKEND_PATH`로
-指定해야 한다. CUDA runtime DLL은 `ggml-cuda.dll`의 imports가 OS loader에 의해 resolve될 때
+explicitly해야 한다. CUDA runtime DLL은 `ggml-cuda.dll`의 imports가 OS loader에 의해 resolve될 때
 find된다.
 
 ## 6. CUDA 초기화 실패 시 exact error 코드

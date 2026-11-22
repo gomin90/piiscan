@@ -1,7 +1,7 @@
 """Jev-Style 오프라인 bundle 준비.
 
 scorer 바이너리가 vendor/llama.cpp 절대 rpath에 의존하면 다른 PC(폐쇄망)에서
-실행되지 않는다. 이 도구는 native dylib을 scorer旁边에 복사하고 rpath를
+실행되지 않는다. 이 도구는 native dylib을 scorer 옆에 복사하고 rpath를
 @loader_path로 바꿔 bundle을 self-contained 만든다.
 
     python tools/jev_package.py

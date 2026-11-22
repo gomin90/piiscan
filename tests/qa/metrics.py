@@ -183,3 +183,89 @@ def protection_metrics() -> dict:
         "code_groups": [g.as_dict() for g in result.code_groups],
         "rows_parsed": result.rows_parsed,
     }
+
+
+def _ratios(tp: int, fp: int, fn: int) -> tuple[float, float, float]:
+    precision = tp / (tp + fp) if tp + fp else 1.0
+    recall = tp / (tp + fn) if tp + fn else 1.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    return precision, recall, f1
+
+
+def cell_row_metrics(natural_names: bool = True) -> dict:
+    """Cell-level and row-level precision/recall/F1 over the labelled dataset.
+
+    One row per labelled value; the value sits in the column matching its type
+    (natural column names, or meaningless FIELD_01 style names) and a benign
+    cell travels with it. Ground truth is per cell, so both the cell verdict and
+    the row verdict can be scored independently of the column classification.
+    """
+    from app.export.hit_exporter import collect_hit_cells, collect_row_records
+
+    types = sorted({primary for _, primary, _, _ in DATASET if primary})
+    noise = ["normal text", "42", "reference-1", "2024-01-05T10:00:00", "1.5"]
+    if natural_names:
+        header = [COLUMN_NAMES.get(t, f"COL_{t}") for t in types] + ["MIXED_NOISE", "NOTE"]
+    else:
+        header = [f"FIELD_{i + 1:02d}" for i in range(len(types) + 2)]
+    type_index = {t: i for i, t in enumerate(types)}
+    noise_column = len(types)
+
+    rows: list[list[str]] = []
+    truth: dict[tuple[int, int], tuple[str | None, tuple[str, ...]]] = {}
+    for row_number, (value, primary, also_ok, _note) in enumerate(DATASET, start=1):
+        cells = [""] * len(header)
+        column = type_index[primary] if primary is not None else noise_column
+        cells[column] = value
+        cells[-1] = noise[row_number % len(noise)]
+        rows.append(cells)
+        truth[(row_number, column)] = (primary, also_ok)
+        for index in range(len(header)):
+            if index != column:
+                truth[(row_number, index)] = (None, ())
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "qa_rows.csv"
+        with open(path, "w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(header)
+            writer.writerows(rows)
+        result = analyse_file(path, AnalysisConfig(use_ai=False))
+
+    hits = collect_hit_cells([result])
+    cell_tp = cell_fp = cell_fn = 0
+    per_type: dict[str, dict[str, int]] = {}
+    for cell in hits:
+        expected, also_ok = truth.get((cell["row_number"], cell["column_index"]), (None, ()))
+        entry = per_type.setdefault(cell["privacy_type"], {"tp": 0, "fp": 0, "fn": 0})
+        if expected is not None and (cell["privacy_type"] == expected or cell["privacy_type"] in also_ok):
+            cell_tp += 1
+            entry["tp"] += 1
+        else:
+            cell_fp += 1
+            entry["fp"] += 1
+    for (row, index), (expected, _also_ok) in truth.items():
+        if expected is None:
+            continue
+        if not any(c["row_number"] == row and c["column_index"] == index
+                   and c["privacy_type"] == expected for c in hits):
+            cell_fn += 1
+            per_type.setdefault(expected, {"tp": 0, "fp": 0, "fn": 0})["fn"] += 1
+
+    flagged = {r["row_number"] for r in collect_row_records([result]) if r["has_pii"] == "예"}
+    expected_rows = {row for (row, _index), (primary, _o) in truth.items() if primary is not None}
+    row_tp = len(flagged & expected_rows)
+    row_fp = len(flagged - expected_rows)
+    row_fn = len(expected_rows - flagged)
+    cell_precision, cell_recall, cell_f1 = _ratios(cell_tp, cell_fp, cell_fn)
+    row_precision, row_recall, row_f1 = _ratios(row_tp, row_fp, row_fn)
+    return {
+        "cell": {"tp": cell_tp, "fp": cell_fp, "fn": cell_fn,
+                 "precision": round(cell_precision, 3), "recall": round(cell_recall, 3),
+                 "f1": round(cell_f1, 3)},
+        "row": {"tp": row_tp, "fp": row_fp, "fn": row_fn,
+                "precision": round(row_precision, 3), "recall": round(row_recall, 3),
+                "f1": round(row_f1, 3)},
+        "per_type": per_type,
+        "counts": result.cell_counts,
+    }

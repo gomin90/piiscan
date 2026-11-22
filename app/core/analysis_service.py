@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from app.ai.gpu_detector import detect_hardware
@@ -30,6 +31,8 @@ class FileResult:
     total_rows: int
     elapsed_seconds: float
     findings: list = field(default_factory=list)
+    row_records: list = field(default_factory=list)
+    cell_counts: dict = field(default_factory=dict)
     protection: list = field(default_factory=list)
     code_groups: list = field(default_factory=list)
     results: list = field(default_factory=list)
@@ -49,6 +52,13 @@ class FileResult:
             "total_rows": self.total_rows,
             "elapsed_seconds": round(self.elapsed_seconds, 3),
             "findings": self.findings,
+            "row_analysis": {
+                "rows_inspected": self.cell_counts.get("rows_inspected", 0),
+                "rows_with_pii_cells": len(self.row_records),
+                "cell_hits": self.cell_counts.get("cell_hits", 0),
+                "detail_truncated_rows": self.cell_counts.get("detail_truncated_rows", 0),
+                "rows": [record.as_dict() for record in self.row_records],
+            },
             "protection": [g.as_dict() for g in self.protection],
             "code_groups": [g.as_dict() for g in self.code_groups],
             "results": [r.as_dict() for r in self.results],
@@ -121,7 +131,7 @@ def analyse_file(
             batch = []
             if progress and loader.parsed_rows - last_progress >= 10000:
                 last_progress = loader.parsed_rows
-                progress(loader.parsed_rows, loader.progress_total())
+                progress(loader.parsed_rows, loader.progress_total(), engine.cells_inspected)
 
     if batch:
         t0 = time.perf_counter()
@@ -129,8 +139,11 @@ def analyse_file(
         batch_seconds += time.perf_counter() - t0
 
     findings = engine.finalise(stats)
+    row_records = engine.row_records()
+    cell_counts = engine.cell_counts()
     diagnostics.record("rows_parsed", parsed=loader.parsed_rows, errors=loader.error_rows,
                        empty=loader.empty_rows, irregular=loader.irregular_rows)
+    diagnostics.record("cell_scan", **cell_counts)
 
     # 3단계: 보호/코드 그룹 분석
     protection_groups = analyze_protection(stats, findings)
@@ -151,6 +164,29 @@ def analyse_file(
                 logger.warning("RAM 한계 감지 -> AI 추론 중단, 규칙 기반 결과 보존")
                 llm.close()
                 break
+        # Row 문맥 판정은 규칙이 결론 내리지 못한 Row에만, 제한된 횟수만큼 호출된다.
+        row_reviews = 0
+        for record in row_records:
+            if row_reviews >= config.max_ai_row_reviews:
+                diagnostics.record("ai_row_review_cap", limit=config.max_ai_row_reviews,
+                                   remaining=sum(1 for r in row_records if r.needs_review) - row_reviews)
+                break
+            if not record.needs_review:
+                continue
+            verdict = llm.judge_row({
+                "row": record.row,
+                "schema": settings.schema,
+                "table": settings.table,
+                "cells": [cell.as_dict() for cell in record.cells],
+                "basis": record.basis,
+                "needs_review": True,
+            })
+            if verdict:
+                record.ai_review = verdict
+                row_reviews += 1
+        if row_reviews:
+            diagnostics.record("ai_row_review", rows=row_reviews, cells_reviewed=sum(
+                len(record.cells) for record in row_records if record.ai_review))
     for group in code_groups:
         if group.decision == "pending" and llm.llm is not None:
             ai = llm.judge_code_group(group.as_dict())
@@ -179,7 +215,8 @@ def analyse_file(
         path=path,
         settings={"encoding": settings.encoding, "delimiter": settings.delimiter,
                   "header": settings.has_header, "table": settings.table, "schema": settings.schema,
-                  "db_type": settings.db_type, "mode": mode, "size_bytes": file_size(path)},
+                  "db_type": settings.db_type, "mode": mode, "size_bytes": file_size(path),
+                  "analysed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")},
         profile=profile.as_dict(),
         rows_parsed=loader.parsed_rows,
         rows_error=loader.error_rows,
@@ -188,6 +225,8 @@ def analyse_file(
         total_rows=loader.total_rows or loader.parsed_rows,
         elapsed_seconds=elapsed,
         findings=findings,
+        row_records=row_records,
+        cell_counts=cell_counts,
         protection=protection_groups,
         code_groups=code_groups,
         results=results,

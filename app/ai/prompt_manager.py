@@ -50,6 +50,38 @@ def build_prompt(context: dict) -> str:
     return SYSTEM_PROMPT + "\n\n분석 대상:\n" + json.dumps(context, ensure_ascii=False, indent=2)
 
 
+def row_context(record: dict) -> dict:
+    """Row-level LLM context: masked cell values and rule evidence only."""
+    return {
+        "row": record.get("row"),
+        "schema": record.get("schema", ""),
+        "table": record.get("table", ""),
+        "cells": [
+            {
+                "column": cell.get("column"),
+                "column_index": cell.get("column_index"),
+                "type": cell.get("type_key") or cell.get("display_name"),
+                "masked_value": mask_value(str(cell.get("masked_value") or cell.get("value") or "")),
+                "verdict": cell.get("decision", ""),
+                "confidence": cell.get("confidence", 0.0),
+            }
+            for cell in record.get("cells", [])[:8]
+        ],
+        "rule_basis": record.get("basis", ""),
+        "needs_review": record.get("needs_review", False),
+    }
+
+
+def build_row_prompt(context: dict) -> str:
+    instruction = (
+        "당신은 개인정보 탐지 보조 분석기입니다. 주어진 Row의 마스킹된 Cell 근거만 근거로 "
+        "이 행이 개인을 식별할 수 있는 개인 정보인지 판정하고 JSON만 반환하세요. "
+        '응답 형식: {"row": int, "personality": str, "confidence": float, '
+        '"reason": str, "requires_review": bool}'
+    )
+    return instruction + "\n\n" + json.dumps(context, ensure_ascii=False)
+
+
 def build_code_group_prompt(group: dict) -> str:
     instruction = (
         "코드 그룹의 업무 의미와 개인정보 관련성을 JSON으로 반환하세요. "

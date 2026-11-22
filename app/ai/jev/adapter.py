@@ -21,6 +21,7 @@ from app.ai.jev.decision import (
     NAME_CONTEXT_OPTIONS,
     PERSONALITY_OPTIONS,
     PROTECTION_OPTIONS,
+    ROW_PERSONALITY_QUESTION,
     TYPE_OPTIONS,
     JevStyleDecisionRequest,
     JevStyleDecisionResult,
@@ -186,6 +187,7 @@ class JevStyleAdapter:
         self.inference_seconds = 0.0
         self.decisions = 0
         self.failures = 0
+        self.row_reviews = 0
         self.peak_rss_mb = 0.0
         self.last_error: str | None = None
         self.scorer_info: dict = {}
@@ -433,6 +435,48 @@ class JevStyleAdapter:
             "samples_used": state["masked_samples"],
         }
 
+    def classify_row(self, record: dict) -> dict:
+        """Row-context check for ambiguous rows.
+
+        Only masked cell patterns and column names reach the model - no raw value.
+        This is a bounded call: it is used for rows the rule engine could not
+        settle, never for every cell.
+        """
+        cells = record.get("cells", []) or []
+        samples = [str(cell.get("value", "")) for cell in cells][:MAX_SAMPLES]
+        state = build_column_state({
+            "column": f"ROW {record.get('row', '')}",
+            "schema": record.get("schema", ""),
+            "table": record.get("table", ""),
+            "stats": {
+                "rows": 1,
+                "non_empty": len(cells),
+                "null": 0,
+                "masked_like": sum(1 for cell in cells if cell.get("masked")),
+                "numeric_ratio": round(sum(cell.get("value", "").isdigit() for cell in cells) / max(len(cells), 1), 3),
+                "min_len": min((len(s) for s in samples), default=0),
+                "max_len": max((len(s) for s in samples), default=0),
+                "avg_len": round(sum(len(s) for s in samples) / max(len(samples), 1), 1),
+                "samples": samples,
+            },
+            "related_columns": [str(cell.get("column", "")) for cell in cells],
+        })
+        request = JevStyleDecisionRequest("row_context", state, ROW_PERSONALITY_QUESTION,
+                                         PERSONALITY_OPTIONS, "choice", GENERAL_CATEGORY)
+        result = self.decide_many([request])[0]
+        self.row_reviews += 1
+        if not result.ok:
+            return {"row": record.get("row"), "personality": None, "confidence": 0.0,
+                    "reason": result.error or "AI 판정 없음", "requires_review": True}
+        return {
+            "row": record.get("row"),
+            "personality": result.decision,
+            "confidence": round(result.confidence, 3),
+            "reason": f"Row 문맥 {result.decision} (p={result.confidence:.2f}, margin={result.margin:.2f})",
+            "requires_review": result.uncertain or result.margin < MARGIN_REVIEW,
+            "latency_ms": round(result.latency_ms, 1),
+        }
+
     def summary(self) -> dict:
         return {
             "model": self.spec.model_name if self.spec else None,
@@ -448,6 +492,7 @@ class JevStyleAdapter:
             "load_seconds": round(self.load_seconds, 2),
             "inference_seconds": round(self.inference_seconds, 3),
             "decisions": self.decisions,
+            "row_reviews": self.row_reviews,
             "failures": self.failures,
             "peak_rss_mb": round(self.peak_rss_mb, 1),
             "context_limit": self.spec.context_limit if self.spec else 0,

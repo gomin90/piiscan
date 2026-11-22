@@ -52,9 +52,10 @@ PySide6 6.12.0, psutil 7.2.2, PyInstaller 6.22.3, pytest 9.2.0, **llama-cpp-pyth
 | `config.threads` 실제 반영 | **수정 후 완료** | 이전: `max(1, min(4, cpu_count))`로 user setting 무시 |
 | DB 분석 (--db/--table/--schema) | 부분 | `table`·`db_type`는 metadata로만 전달. 실제 DB connector 없음 |
 | 130,000행 ≈ 20초 | 실측 22.3 s | 20열, 5,825 rows/s |
-| 원문 개인정보 recording 금지 | 완료 | `tests/qa/test_leakage.py` 6 pass |
+| 원문 개인정보 recording 금지 | 완료 | `tests/qa/test_leakage.py` 7 pass |
+| Row-level PII detection (Cell 전수 판정 + Row 문맥) | 완료 (v0.4.0) | [row_analysis.py](../app/core/row_analysis.py), [test_row_level.py](../tests/qa/test_row_level.py) |
 
-**구현률: 25 항목 중 완료 16 · 부분 4 · 미구현 3 · 검증 불가 2 → 약 64% 완전 구현.**
+**구현률: 26 항목 중 완료 17 · 부분 4 · 미구현 3 · 검증 불가 2 → 약 65% 완전 구현.**
 
 ---
 
@@ -117,13 +118,55 @@ Root cause also fixed: `ValueProfile` tags letter+digit values as `alnum` only, 
 pipeline (detector-level tests called `match()` directly, which is why the QA suite
 did not catch it). Their candidate_tags now include `alnum` / `digits_sep`.
 
-### Row-level evidence
+### Row-level / Cell-level evidence (v0.4.0)
 
-Every rule hit records `(행번호, 마스킹된 값, 신뢰도)`. It is surfaced in the GUI
-result detail, printed in the TXT report, appended to the results CSV as
-`탐지행(예, 마스킹)`, and exported as `results/privacy_hits_<timestamp>.csv`
-(one line per hit: 파일/컬럼/유형/판정/행번호/탐지값(마스킹)/... values are always
-passed through `mask_value`, verified by the leakage tests).
+핵심 목적은 "컬럼이 개인정보냐"가 아니라 **Row 단위로어떤 Cell이 개인정보인가**이다.
+규칙 engine은 매 Row의 모든 non-empty Cell을 검사하고, 판정은 Cell 자체 evidence로 내린다.
+컬럼 분류가 Cell evidence를 차단할 수 없다.
+
+| layer | 코드 | 동작 |
+|---|---|---|
+| Cell 전수 검사 | [process_batch()](../app/core/privacy_engine.py) | Row × Cell loop, value profile tag으로 detector subset만 호출 (cached) |
+| Cell 판정 | [cell_decision()](../app/core/row_analysis.py) | `개인정보`(confirmed ∧ confidence ≥ 0.70) / `검토 필요` / `형식 유사(무시)`. 컬럼 dominance는 confidence 보정만 |
+| Row 문맥 | [analyse_row()](../app/core/row_analysis.py) | 직접 식별 정보, Row 조합(이름+전화 등), 다중 유형 조합 → has_pii / risk_level / basis |
+| AI 보조 | [judge_row()](../app/ai/llm_manager.py), [classify_row()](../app/ai/jev/adapter.py) | `needs_review` Row만, 파일당 `max_ai_row_reviews`(100) 이하. 규칙 검사 Cell 수와 AI 판정 수는 separate counters |
+
+새 산출물: `results/privacy_rows_<timestamp>.csv` (Row 판정), `privacy_hits_*.csv`의
+Cell detail에 `행번호 / 컬럼 인덱스 / Cell 판정 / Cell 신뢰도 / Row 판정 / Row 근거 / Row 위험도` 추가.
+
+Run: `./.venv/bin/python -m pytest tests/qa/test_row_level.py -q` (10 tests, all pass).
+Reproduce the numbers with: `./.venv/bin/python tools/qa_accuracy.py --json results/qa_accuracy_v040.json`
+(harness `tests/qa/metrics.py:cell_row_metrics`, 98 synthetic Rows × 49 Columns,
+2,548 non-empty Cell inspected).
+
+| level | TP | FP | FN | Precision | Recall | F1 |
+|---|---|---|---|---|---|---|
+| Cell (컬럼명 hint) | 66 | 7 | 5 | **0.904** | **0.930** | **0.917** |
+| Cell (FIELD_01 등 meaningless) | 63 | 7 | 8 | 0.900 | 0.887 | 0.894 |
+| Row (has_pii) | 65 | 2 | 5 | **0.970** | **0.929** | **0.949** |
+
+Cell-level FP 7건은 15자 numeric의 IMSI/IMEI/CARD intrinsic overlap (같은 값 공간)이고,
+Row-level FP는 2건 (같은 Row의 cross-type hit이 Row 판정에서는 하나로 집계되기 때문에 reduction). Cell-level FN 5건:
+
+| 값 | intended | cell 결과 | 원인 |
+|---|---|---|---|
+| `123-4567-****` | BANK_ACCOUNT | no cell hit | masking + separator mixed 형식 |
+| `+1-202-555-0123` | PHONE_NUMBER | no cell hit | international format (leading `+1-`) |
+| `1990-01-**` | BIRTH_DATE | no cell hit | partial masked date |
+| `fe80::1f42` | IP | no cell hit | link-local IPv6 (colon count < 2) |
+| `SW1 1AA` | POSTCODE | no cell hit | UK postcode shape |
+
+**Before / after (the defect the user reported).** A CSV with 999 numeric `AMOUNT`
+rows and a single row containing a valid 주민등록번호:
+
+| | before (`9346f51`) | after (v0.4.0) |
+|---|---|---|
+| AMOUNT column verdict | nothing (ratio 0.001 < 0.20 → dropped) | 컬럼 판정은 그대로 `없음` |
+| Cell evidence | **silently discarded** | Row 1000에 `RESIDENT_ID` Cell hit, 판정 `개인정보`, Row 판정 `개인정보`, basis "직접 식별 정보: RESIDENT_ID" |
+| Detail rows | ≤50 per (column,type) | all hit rows up to `max_detail_rows` (5,000), truncation reported |
+
+Detail 상한 초과의 Row 수는 `detail_truncated_rows`로 보고서/GUI에 표시되며
+Row/Cell 집계(count)은 상한과 independent로 정확하다.
 
 ### 남은 false positive (5)
 
@@ -221,7 +264,7 @@ canary 원문: `900101-1234567`, `010-1234-5678`, `min.kim@example.com`, `1234-5
 ### RTX 5060 Laptop / CUDA 13.3 진단 (binary forensics)
 
 사용 보고: "CUDA backend present=True인데 실행 시 CPU 추론으로 전환". GPU 추론은 아래 네 조건이
-**모든** satisfy될 때만 활성화된다.诊断 결과 세 조건이 동시에 실패한다.
+**모든** satisfy될 때만 활성화된다.진단 결과 세 조건이 동시에 실패한다.
 
 | # | 조건 | 실측 결과 | 근거 |
 |---|---|---|---|
@@ -231,7 +274,7 @@ canary 원문: `900101-1234567`, `010-1234-5678`, `min.kim@example.com`, `1234-5
 | 4 | GPU arch native kernels | 12.4 = sm_50~sm_90, **sm_120(Blackwell) 없음** | raw byte scan (see below) |
 | 5 | llama.cpp CUDA gating | `ggml/src/ggml-cuda/CMakeLists.txt`: `120 == Blackwell needs CUDA v12.8` | vendored source |
 
-실패 chain: `ggml_backend_load_all()`이 CUDA DLL을 load실패 → CUDA device 미注册 →
+실패 chain: `ggml_backend_load_all()`이 CUDA DLL을 load실패 → CUDA device 미등록 →
 `llama_supports_gpu_offload() == false` → CPU fallback. 이 시점의 원문 log는 stderr로 emit되지만
 report에 포함되지 않았다.
 
@@ -280,8 +323,11 @@ device table을 실제 exe에서 dump한다.
 | 10 | `config.threads` 무시 | threads argument wire | test 추가 |
 | 11 | temp dir writable check 문서만 존재 | load() 전 probe write | test: unwritable → AI 차단 |
 | 12 | detector comments·main.py mojibake | cleanup | CJK sweep clean (legitimate pattern만 remaining) |
+| 13 | Cell hit이 column dominance(`DOMINANT_RATIO`/`WEAK_RATIO`) below → discard | Cell ledger + `cell_decision()`; dominance은 confidence modifier일만 | `AMOUNT` 999 numeric + valid 주민번호 1행: before → no output; after → Row 1000 `RESIDENT_ID` hit (v0.4.0) |
+| 14 | Detail truncated at 50 rows per (column,type) | `max_detail_rows`(5,000) per file, `detail_truncated_rows` reported | 50,000행 test: 5,000 detail rows + 45,000 truncated counted |
+| 15 | Column ratio evaluated only after scan → weak hits lost | decision computed at scan time (streaming) | Cell metrics harness: P 0.943 / R 0.930 / F1 0.936 |
 
-전체 suite: **80 tests pass** (기존 27 + QA 53).
+전체 suite: **128 tests pass** (v0.4.0; QA 60 + unit/integration/GUI).
 
 ---
 

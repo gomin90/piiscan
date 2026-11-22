@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from app import __version__
 from app.utils.masking import mask_value
 
 RISK_ORDER = {"매우 높음": 0, "높음": 1, "보통": 2, "낮음": 3, "확인 필요": 4}
@@ -15,16 +16,21 @@ def write_txt(file_results: list, output: str | Path) -> str:
     lines: list[str] = []
     lines.append("=" * 70)
     lines.append("개인정보 탐지 분석 보고서 (Privacy Scanner)")
+    lines.append(f"버전: {__version__}")
     lines.append(f"생성일시: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append("=" * 70)
 
     total_rows = sum(result.rows_parsed for result in file_results)
+    total_cells = sum(result.cell_counts.get("cells_inspected", 0) for result in file_results)
+    pii_rows = sum(len(result.row_records) for result in file_results)
     pii_columns = sum(1 for result in file_results for r in result.results)
     high_risk = sum(1 for result in file_results for r in result.results if r.risk_level in ("매우 높음", "높음"))
     lines.append("")
     lines.append("[전체 요약]")
     lines.append(f"  분석 파일 수: {len(file_results)}")
     lines.append(f"  분석 행 수: {total_rows:,}")
+    lines.append(f"  전수 검사 Cell 수: {total_cells:,}")
+    lines.append(f"  개인정보 Cell이 발견된 Row 수: {pii_rows:,}")
     lines.append(f"  개인정보 컬럼-유형 항목: {pii_columns}")
     lines.append(f"  위험도 높음 및 확인 필요 항목: {high_risk}")
     lines.append("")
@@ -36,6 +42,29 @@ def write_txt(file_results: list, output: str | Path) -> str:
         lines.append(f"  인코딩: {result.settings.get('encoding')} | 구분자: {repr(result.settings.get('delimiter'))} | 헤더: {result.settings.get('header')}")
         lines.append(f"  분석 방식: {result.settings.get('mode')} | 분석 행: {result.rows_parsed:,} (오류 {result.rows_error}, 빈 행 {result.rows_empty})")
         lines.append(f"  소요 시간: {result.elapsed_seconds:.2f}s | AI: {result.ai_summary.get('status', '미사용')}")
+        counts = result.cell_counts
+        lines.append(
+            f"  Row/Cell 검사: Row {counts.get('rows_inspected', 0):,} / Cell {counts.get('cells_inspected', 0):,} "
+            f"(빈 Cell {counts.get('empty_cells', 0):,}, 규칙 호출 {counts.get('detector_calls', 0):,}, "
+            f"Cell hit {counts.get('cell_hits', 0):,})"
+        )
+        if result.row_records:
+            lines.append(f"  [Row 단위 판정] 개인정보 포함 Row {len(result.row_records)}건")
+            for record in result.row_records[:20]:
+                types = ", ".join(record.pii_types + record.review_types)
+                where = ", ".join(f"{cell.column}(#{cell.column_index})" for cell in record.cells[:5])
+                lines.append(
+                    f"    Row {record.row}: {'개인정보' if record.has_pii else '없음'} | {types} | "
+                    f"{where} | 근거: {record.basis} | 신뢰도 {record.confidence:.2f} | "
+                    f"위험도 {record.risk_level} | {'검토 필요' if record.needs_review else '확정'}"
+                )
+            if len(result.row_records) > 20:
+                lines.append(f"    ... 나머지 {len(result.row_records) - 20}건은 privacy_rows CSV 참조")
+        elif counts.get("detail_truncated_rows"):
+            lines.append(
+                f"  Row 상세 상한({counts.get('detail_limit', 0)}) 초과: {counts['detail_truncated_rows']} Row 생략 "
+                "(Row/Cell 수는 그대로 집계됨)"
+            )
         if result.protection:
             lines.append("  [보호(MASK/HASH/ENC) 컬럼]")
             for group in result.protection:

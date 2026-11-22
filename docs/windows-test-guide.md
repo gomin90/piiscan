@@ -253,7 +253,7 @@ score purely from local files.
 
 | 오류 | 원인 | 해결 |
 |---|---|---|
-| `ModuleNotFoundError: No module named 'numpy'` | 의존성 설치 단계(§3)를 실행하지 않았거나, Python minor version이 wheelhouse(cp312/313/314)와 다를 | `python --version` 확인 → `powershell -ExecutionPolicy Bypass -File scripts\windows\install-offline.ps1` 재실행. 스크립트가 minor version을 검사하고Missing wheel을 명시적으로报错 |
+| `ModuleNotFoundError: No module named 'numpy'` | 의존성 설치 단계(§3)를 실행하지 않았거나, Python minor version이 wheelhouse(cp312/313/314)와 다를 | `python --version` 확인 → `powershell -ExecutionPolicy Bypass -File scripts\windows\install-offline.ps1` 재실행. 스크립트가 minor version을 검사하고 missing wheel을 명시적으로 error로 알린다 |
 | `No module named 'PySide6'` | same as numpy | `install-offline.ps1` 후 `python -c "import PySide6, numpy, psutil, tokenizers, yaml"` |
 | `jev-score.exe` exits non-zero / DLL error | MinGW cross-built binary + MSVC `llama.dll` | `build-jev-score.ps1`로 MSVC native rebuild, or VC++ Redistributable install |
-| `pip install` says "no matching distribution" | Python minor 버전 불匹配 | cp312 / cp313 / cp314 win_amd64 wheel 중 해당 interpreter를 설치 |
+| `pip install` says "no matching distribution" | Python minor 버전 mismatch | cp312 / cp313 / cp314 win_amd64 wheel 중 해당 interpreter를 설치 |

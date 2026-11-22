@@ -54,11 +54,24 @@ The **환경 설정** tab exposes:
 
 CLI equivalents are `--mode`, `--table`, `--schema`, `--db`, `--gpu-layers`.
 
-## Row-level evidence
+## Row-level / Cell-level evidence
 
-Clicking a result row fills the **탐지 상세 (행 단위)** table: 행번호 / 컬럼 / 유형 /
-판정 / 탐지값(마스킹). The same rows are exported to
-`results/privacy_hits_<timestamp>.csv`. 원본 값은 기록되지 않습니다 (always masked).
+분석은 컬럼이 아니라 **Cell** 단위로 수행된다: 모든 Row의 모든 비어 있지 않은 Cell을
+규칙 엔진이 검사하고, 각 hit은 Cell 판정(`개인정보` / `검토 필요`)과 Row 판정(개인정보
+존재 여부, 근거, 위험도)으로 기록된다. 컬럼이 "개인정보 컬럼"으로 분류되지 않았더라도
+Cell evidence는 삭제되지 않는다.
+
+* 결과 탭의 **Row 단위 판정** table: 행번호 / 개인정보 존재 / 유형 / 발생 컬럼 / 위험도 /
+  검토 필요.
+* **Cell 상세** table: 행번호 / 컬럼 / 컬럼 인덱스 / 유형 / 판정 / 탐지값(마스킹).
+* 파일 export: `results/privacy_rows_<timestamp>.csv` (Row 판정, 한 Row 한 line)와
+  `results/privacy_hits_<timestamp>.csv` (Cell hit, 한 Cell 한 line).
+* Row 문맥(예: 이름 + 전화번호 + 주소가 같은 Row)은 판정 근거(`판정 근거`)에 recorded.
+* Ambiguous Row만 AI(Jev-Style 또는 local LLM)로 보조 판정하며, 파일당 maximum
+  `max_ai_row_reviews`(default 100)번만 호출된다. 규칙 검사 Cell 수와 AI 판정 수는
+  diagnostics에서 separately 집계된다.
+* Detail 상한(default 5,000 Row)을 초과하면 초과 Row 수가 보고서에 표시되고
+  Row/Cell count는 그대로 정확하다. 원본 값은 기록되지 않는다 (always masked).
 
 ## GPU (NVIDIA CUDA)
 

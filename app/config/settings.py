@@ -27,6 +27,12 @@ class AnalysisConfig:
     max_distinct_tracked: int = DEFAULT_MAX_DISTINCT_TRACKED
     max_samples: int = DEFAULT_MAX_SAMPLES
     max_hit_rows: int = 50  # 컬럼별 행 단위 탐지 상세 retaining limit
+    # Row-level detail is kept for every row that produced a cell hit, up to this
+    # many rows (cell counts and row counts are always exact; only the detail list
+    # is capped, and the truncation is reported in the result).
+    max_detail_rows: int = 5000
+    # AI is never called per cell/row: only ambiguous rows, capped like this.
+    max_ai_row_reviews: int = 100
     threads: int = DEFAULT_THREADS
     use_ai: bool = True
     # AI 판정 engine: "jev" (Jev-Style Decision Model), "llm" (generative local GGUF), "auto"

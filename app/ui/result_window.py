@@ -1,4 +1,4 @@
-"""결과 테이블 및 컬럼 상세 보기."""
+"""결과 테이블 및 Row/Cell 단위 상세 보기."""
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
@@ -10,12 +10,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.export.hit_exporter import collect_hit_cells, collect_row_records
+
 COLUMNS = [
     "파일명",
     "원본DB",
     "스키마",
     "테이블명",
     "컬럼명",
+    "컬럼 인덱스",
     "개인정보 유형",
     "판정",
     "탐지 건수",
@@ -44,7 +47,7 @@ class ResultWindow(QWidget):
         self.table.setColumnCount(len(COLUMNS))
         self.table.setHorizontalHeaderLabels(COLUMNS)
         self.table.horizontalHeader().setStretchLastSection(True)
-        widths = [90, 60, 60, 90, 120, 110, 100, 70, 90, 70, 120, 90, 90, 70, 80, 90, 80, 220]
+        widths = [90, 60, 60, 90, 120, 60, 110, 100, 70, 90, 70, 120, 90, 90, 70, 80, 90, 80, 220]
         for index, width in enumerate(widths):
             self.table.setColumnWidth(index, width)
         self.table.cellClicked.connect(self._on_row_clicked)
@@ -62,14 +65,26 @@ class ResultWindow(QWidget):
             detail_layout.addWidget(self.detail_labels[field], index, 1)
         layout.addWidget(self.detail)
 
-        # Row-level evidence: exactly which source rows matched.
-        layout.addWidget(QLabel("탐지 상세 (행 단위, 값은 마스킹됨)"))
+        # Row/cell level evidence: exactly which source cells matched.
+        layout.addWidget(QLabel("Row/Cell 단위 상세 (값은 마스킹됨)"))
         self.hit_table = QTableWidget()
-        self.hit_table.setColumnCount(5)
-        self.hit_table.setHorizontalHeaderLabels(["행번호", "컬럼", "유형", "판정", "탐지값(마스킹)"])
-        for index, width in enumerate([70, 120, 110, 110, 160]):
+        self.hit_table.setColumnCount(6)
+        self.hit_table.setHorizontalHeaderLabels(
+            ["행번호", "컬럼", "컬럼 인덱스", "유형", "Cell 판정", "탐지값(마스킹)"]
+        )
+        for index, width in enumerate([70, 120, 70, 110, 110, 160]):
             self.hit_table.setColumnWidth(index, width)
         layout.addWidget(self.hit_table)
+
+        self.row_table = QTableWidget()
+        self.row_table.setColumnCount(6)
+        self.row_table.setHorizontalHeaderLabels(
+            ["행번호", "개인정보 존재", "유형", "발생 컬럼", "Row 위험도", "검토"]
+        )
+        for index, width in enumerate([70, 90, 140, 160, 90, 70]):
+            self.row_table.setColumnWidth(index, width)
+        layout.addWidget(QLabel("Row 단위 판정"))
+        layout.addWidget(self.row_table)
 
     def show_hits(self, result) -> None:
         rows = result.hit_rows if hasattr(result, "hit_rows") else []
@@ -77,9 +92,30 @@ class ResultWindow(QWidget):
         for index, hit in enumerate(rows):
             self.hit_table.setItem(index, 0, QTableWidgetItem(str(hit["row"])))
             self.hit_table.setItem(index, 1, QTableWidgetItem(result.column))
-            self.hit_table.setItem(index, 2, QTableWidgetItem(result.display_name))
-            self.hit_table.setItem(index, 3, QTableWidgetItem(getattr(result, "verdict", "개인정보")))
-            self.hit_table.setItem(index, 4, QTableWidgetItem(hit["value"]))
+            self.hit_table.setItem(index, 2, QTableWidgetItem(str(getattr(result, "column_index", 0))))
+            self.hit_table.setItem(index, 3, QTableWidgetItem(result.display_name))
+            self.hit_table.setItem(index, 4, QTableWidgetItem(getattr(result, "verdict", "개인정보")))
+            self.hit_table.setItem(index, 5, QTableWidgetItem(hit["value"]))
+
+    def show_rows(self, file_results: list) -> None:
+        records = collect_row_records(file_results)
+        cells = collect_hit_cells(file_results)
+        self.row_table.setRowCount(len(records))
+        for index, record in enumerate(records):
+            self.row_table.setItem(index, 0, QTableWidgetItem(str(record["row_number"])))
+            self.row_table.setItem(index, 1, QTableWidgetItem(record["has_pii"]))
+            self.row_table.setItem(index, 2, QTableWidgetItem(record["pii_types"] or record["review_types"]))
+            self.row_table.setItem(index, 3, QTableWidgetItem(record["columns"]))
+            self.row_table.setItem(index, 4, QTableWidgetItem(record["risk_level"]))
+            self.row_table.setItem(index, 5, QTableWidgetItem(record["needs_review"]))
+        self.hit_table.setRowCount(len(cells))
+        for index, cell in enumerate(cells):
+            self.hit_table.setItem(index, 0, QTableWidgetItem(str(cell["row_number"])))
+            self.hit_table.setItem(index, 1, QTableWidgetItem(cell["column"]))
+            self.hit_table.setItem(index, 2, QTableWidgetItem(str(cell["column_index"])))
+            self.hit_table.setItem(index, 3, QTableWidgetItem(cell["privacy_type"]))
+            self.hit_table.setItem(index, 4, QTableWidgetItem(cell["verdict"]))
+            self.hit_table.setItem(index, 5, QTableWidgetItem(cell["masked_value"]))
 
     def show_results(self, results: list) -> None:
         rows = sorted(results, key=lambda r: (RISK_ORDER.get(r.risk_level, 9), -r.hits))
@@ -92,6 +128,7 @@ class ResultWindow(QWidget):
                 row.schema or "-",
                 row.table,
                 row.column,
+                str(getattr(row, "column_index", 0)),
                 row.display_name,
                 getattr(row, "verdict", "개인정보"),
                 str(row.hits),

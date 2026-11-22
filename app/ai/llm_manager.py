@@ -17,7 +17,13 @@ from pathlib import Path
 from app.ai.cpu_fallback import InferencePlan, plan_inference
 from app.ai.gpu_detector import HardwareReport, detect_hardware
 from app.ai.model_loader import ModelInfo, discover_models, select_model
-from app.ai.prompt_manager import build_code_group_prompt, build_prompt, column_context
+from app.ai.prompt_manager import (
+    build_code_group_prompt,
+    build_prompt,
+    build_row_prompt,
+    column_context,
+    row_context,
+)
 from app.ai.response_validator import parse_response, validate
 from app.config.settings import AnalysisConfig
 
@@ -77,6 +83,39 @@ class OfflineSemanticAnalyzer:
             "privacy_relevant": bool(group.get("privacy_relevant")),
             "privacy_type": "CODE_GROUP",
             "confidence": 0.3,
+            "requires_review": True,
+        }
+
+    def judge_row(self, row: dict) -> dict | None:
+        """Row-level meaning check without a GGUF model (rule/meaning heuristics)."""
+        types = {str(cell.get("type", "")) for cell in row.get("cells", [])}
+        if not types:
+            return None
+        direct = types & {
+            "주민등록번호", "외국인등록번호", "카드번호", "계좌번호", "생체 정보",
+            "여권번호", "운전면허번호", "사회보장번호", "보험번호",
+        }
+        if direct:
+            return {
+                "row": row.get("row"),
+                "personality": "SENSITIVE_PERSONAL_DATA",
+                "confidence": 0.6,
+                "reason": "직접 식별 정보 Cell 존재 (오프라인 의미 분석)",
+                "requires_review": False,
+            }
+        if len(types) >= 2:
+            return {
+                "row": row.get("row"),
+                "personality": "PERSONAL_DATA",
+                "confidence": 0.45,
+                "reason": f"{len(types)}개 개인 속성 Cell이 같은 Row에 존재",
+                "requires_review": True,
+            }
+        return {
+            "row": row.get("row"),
+            "personality": "UNCERTAIN",
+            "confidence": 0.3,
+            "reason": "단독 Cell 형식만 근거 -> Row 문맥으로는 판단 불가",
             "requires_review": True,
         }
 
@@ -201,6 +240,23 @@ class LocalLLMEngine:
                 return judgement
         self.inference_seconds += time.perf_counter() - started
         return None  # AI 미확정
+
+    def judge_row(self, row: dict) -> dict | None:
+        if self.llm is None:
+            return self.heuristic.judge_row(row)
+        started = time.perf_counter()
+        text = self._generate(build_row_prompt(row_context(row)))
+        self.inference_seconds += time.perf_counter() - started
+        data = parse_response(text)
+        if not data:
+            return None
+        return {
+            "row": row.get("row"),
+            "personality": str(data.get("personality", "UNCERTAIN")).upper(),
+            "confidence": float(data.get("confidence", 0.0)),
+            "reason": str(data.get("reason", ""))[:200],
+            "requires_review": bool(data.get("requires_review", True)),
+        }
 
     def judge_code_group(self, group: dict) -> dict | None:
         if self.llm is None:

@@ -17,12 +17,13 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from app import __version__
 from app.ai import create_ai_engine
 from app.ai.gpu_detector import detect_hardware
 from app.config.settings import AnalysisConfig
 from app.core.analysis_service import analyse_file
 from app.export.csv_exporter import write_csv
-from app.export.hit_exporter import write_hit_rows
+from app.export.hit_exporter import write_hit_rows, write_row_records
 from app.export.txt_exporter import write_txt
 from app.utils.logger import Diagnostics, get_logger
 
@@ -52,6 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="JSON 요약 stdout")
     parser.add_argument("--report-json", help="실행/진단 결과를 JSON 파일로 저장 (원문 개인정보 없음)")
     parser.add_argument("--gui", action="store_true", help="PySide6 GUI 실행")
+    parser.add_argument("--version", action="version", version=f"Privacy Scanner {__version__}")
     return parser
 
 
@@ -102,12 +104,24 @@ def run_cli(args) -> int:
             overrides["has_header"] = args.header == "yes"
         result = analyse_file(path, config, llm, diagnostics=diagnostics, overrides=overrides)
         results.append(result)
+        counts = result.cell_counts
         logger.info(
-            "%s -> 개인정보 유형 %d개, 위험도 높음 %d건 (%.2fs)",
+            "%s -> Row %d / Cell %d 전수 검사, 개인정보 Row %d건, 컬럼-유형 %d건, "
+            "위험도 높음 %d건 (%.2fs)",
             Path(path).name,
+            counts.get("rows_inspected", 0),
+            counts.get("cells_inspected", 0),
+            len(result.row_records),
             len(result.results),
             sum(1 for r in result.results if r.risk_level in ("매우 높음", "높음")),
             result.elapsed_seconds,
+        )
+        logger.info(
+            "Row 단위: Cell hits %d (빈 Cell %d, 규칙 호출 %d), AI 판단 %d회",
+            counts.get("cell_hits", 0),
+            counts.get("empty_cells", 0),
+            counts.get("detector_calls", 0),
+            result.ai_summary.get("decisions", 0),
         )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -116,7 +130,8 @@ def run_cli(args) -> int:
     csv_path = write_csv(flat_results, output_dir / f"privacy_results_{timestamp}.csv")
     txt_path = write_txt(results, output_dir / f"privacy_report_{timestamp}.txt")
     hits_path = write_hit_rows(results, output_dir / f"privacy_hits_{timestamp}.csv")
-    logger.info("결과: %s / %s / %s", csv_path, txt_path, hits_path)
+    rows_path = write_row_records(results, output_dir / f"privacy_rows_{timestamp}.csv")
+    logger.info("결과: %s / %s / %s / %s", csv_path, txt_path, hits_path, rows_path)
 
     report = {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

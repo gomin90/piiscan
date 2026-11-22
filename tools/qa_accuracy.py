@@ -28,6 +28,7 @@ from app.core.analysis_service import analyse_file
 from app.core.privacy_engine import build_detectors
 from app.detectors.base import profile_of
 from tests.qa.dataset import DATASET, PROTECTION_COLUMNS, CODE_GROUP_COLUMNS
+from tests.qa.metrics import cell_row_metrics
 
 # Natural column name for each privacy type (column-level tests).
 COLUMN_NAMES = {
@@ -192,6 +193,8 @@ def main() -> int:
     det_hinted = detector_metrics(column_hint=True)
     pipe = pipeline_metrics()
     prot = protection_metrics()
+    cell_ctx = cell_row_metrics(natural_names=True)
+    cell_plain = cell_row_metrics(natural_names=False)
 
     print("=== detector-level accuracy (value level) ===")
     print(f"{'type':20} {'pos':>4} {'TP':>3} {'FP':>3} {'FN':>3} {'P':>6} {'R':>6} {'F1':>6}")
@@ -212,10 +215,20 @@ def main() -> int:
     print("\n=== protection / code group ===")
     print(json.dumps(prot, ensure_ascii=False, indent=2))
 
+    print("\n=== cell-level / row-level (Row 전수 scan) ===")
+    for label, metric in (("column-name context", cell_ctx), ("meaningless column names", cell_plain)):
+        c, r = metric["cell"], metric["row"]
+        print(f"{label:26} cell P/R/F1 = {c['precision']:.3f}/{c['recall']:.3f}/{c['f1']:.3f} "
+              f"(TP {c['tp']}, FP {c['fp']}, FN {c['fn']})  |  "
+              f"row P/R/F1 = {r['precision']:.3f}/{r['recall']:.3f}/{r['f1']:.3f} "
+              f"(TP {r['tp']}, FP {r['fp']}, FN {r['fn']})")
+
     Path(args.json).parent.mkdir(parents=True, exist_ok=True)
     Path(args.json).write_text(json.dumps(
         {"detector": det, "detector_with_column_hint": det_hinted,
-         "pipeline": pipe, "protection": prot}, ensure_ascii=False, indent=2
+         "pipeline": pipe, "protection": prot,
+         "cell_row_context": cell_ctx, "cell_row_no_context": cell_plain},
+        ensure_ascii=False, indent=2
     ), encoding="utf-8")
     print(f"\nreport written to {args.json}")
     return 0

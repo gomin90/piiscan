@@ -141,6 +141,16 @@ class JevStyleEngine:
             "requires_review": result.uncertain or result.margin < MARGIN_REVIEW,
         }
 
+    def judge_row(self, record: dict) -> dict | None:
+        """Row-context judgement for rows the rules could not settle."""
+        if self.adapter is None:
+            return None
+        outcome = self.adapter.classify_row(record)
+        self.decisions = self.adapter.decisions
+        self.failures = self.adapter.failures
+        self.inference_seconds = self.adapter.inference_seconds
+        return outcome
+
     def close(self) -> None:
         if self.adapter is not None:
             # Keep the last adapter summary so the report still shows which backend

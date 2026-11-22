@@ -44,11 +44,17 @@ Options: `--encoding`, `--delimiter`, `--header`, `--batch-size`, `--mode
   카드번호(Luhn), 은행계좌(체크섬), 위도/경도, 이름, 이메일, 전화번호, 상세주소,
   생년월일, IMSI, IMEI, 지문/홍채 후보, `.sec`/`.id`/wildcard 사용자 정의 ID,
   SN/UUID/MAC/IP/Postcode(낮은 우선순위).
+- Row-level PII detection: every non-empty cell of every row is checked by the
+  rule engine, and each hit is reported with row number, column index, type,
+  masked value, cell verdict, confidence and the row-context basis (e.g.
+  "이름 + 전화번호" in the same record). A column being classified as non-privacy
+  never suppresses a confirmed cell hit. Ambiguous rows are sent to the AI layer
+  only, up to `max_ai_row_reviews` times per file.
 - MASK/HASH/ENC column relationship analysis with value-level verification.
 - Code-group (GROUP_CODE/CODE/CODE_NAME) semantic analysis.
 - Jev-Style Decision Model (0.8B v3 / 2B v4, GGUF) 로컬 판정 엔진: State+Question+
   fixed options → 선택지별 확률. 규칙 결과와 separately 저장되며 AI 실패 시 규칙 결과만
-  사용한다. RAM이 부족하면 AI автоматически 생략된다.
+  사용한다. RAM이 부족하면 AI 자동 생략된다.
 - Local GGUF inference through llama.cpp with CUDA/Metal/CPU auto selection and
   automatic CPU fallback; the rule result is always produced even if AI fails.
 - Streaming parse: 130,000+ rows analysed in ~1GB-bounded memory (HyperLogLog
@@ -105,7 +111,7 @@ piiscan-model-0.8b.zip   508.6 MB   0.8B v3 GGUF + tokenizer
 piiscan-model-2b.zip    1219.1 MB   2B v4 GGUF + tokenizer
 ```
 
-Published at [release v0.3.0](https://github.com/gomin90/piiscan/releases/tag/v0.3.0).
+Published at [release v0.4.0](https://github.com/gomin90/piiscan/releases/tag/v0.4.0).
 Build them yourself with `python tools/make_release_bundle.py --split`, then check integrity with
 `scripts/windows/verify-offline-bundle.ps1`.
 

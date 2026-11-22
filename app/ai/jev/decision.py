@@ -101,6 +101,8 @@ COLUMN_MEANING_OPTIONS = {
 
 # 9-option 버전은 0.8B에서 0/9, 2B에서 3/9 Accuracy로 측정되어 코드 그룹 판정에는
 # 3-choice binary를 사용한다 (실측: 0.8B 0.30, 2B 0.90).
+ROW_PERSONALITY_QUESTION = "이 행(Row)은 특정 개인을 식별할 수 있는 개인정보를 포함하는가?"
+
 CODE_MEANING_QUESTION = "이 컬럼은 개인 관련 데이터인가, 아니면 시스템/업무 코드나 일반 값인가?"
 CODE_MEANING_OPTIONS = {
     "PERSONAL_DATA": "개인 관련 데이터: 개인을 식별·연락·위치·속성·금융 정보 또는 보호 처리된 파생 컬럼",

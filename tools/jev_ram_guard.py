@@ -1,7 +1,7 @@
 """RAM 한계(8GB/4GB/2GB)에서 Jev-Style 모델 선택/생략 실측.
 
 `manager.select()`와 `adapter.load()` 경로를 simulated HardwareReport로 실행하여
-"8GB机器에서 2B 실행 가능한지"를 실행 근거로 판단한다.
+"8GB RAM 8GB에서 2B 실행 가능한지"를 실행 근거로 판단한다.
 
     python tools/jev_ram_guard.py
 """

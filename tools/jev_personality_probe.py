@@ -1,7 +1,7 @@
 """개인정보 여부(personality) 판정 question/option 형태 비교.
 
-Jev-Style이支持하는 question type(choice vs noul(true/false)) 중
-어떤 형태가 한국어 PII 판정에서 더 정확한지实测한다.
+Jev-Style이support하는 question type(choice vs noul(true/false)) 중
+어떤 형태가 한국어 PII 판정에서 더 정확한지실측한다.
 """
 from __future__ import annotations
 

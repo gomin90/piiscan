@@ -37,6 +37,7 @@ class ColumnResult:
     agreement: str = "AI 미사용"
     final_decision: str = ""
     verdict: str = "개인정보"
+    column_index: int = 0
     hit_rows: list = field(default_factory=list)
 
     def as_dict(self) -> dict:
@@ -49,6 +50,7 @@ class ColumnResult:
             "mode": self.mode,
             "rows_analysed": self.rows_analysed,
             "column": self.column,
+            "column_index": self.column_index,
             "privacy_type": self.privacy_type,
             "display_name": self.display_name,
             "hits": self.hits,
@@ -167,6 +169,7 @@ def build_results(
                         mode=mode,
                         rows_analysed=rows_analysed,
                         column=finding["column"],
+                        column_index=finding["index"],
                         privacy_type=type_info["type_key"],
                         display_name=type_info["display_name"],
                         hits=type_info["hits"],
@@ -202,6 +205,7 @@ def build_results(
                     mode=mode,
                     rows_analysed=rows_analysed,
                     column=finding["column"],
+                        column_index=finding["index"],
                     privacy_type=type_info["type_key"],
                     display_name=type_info["display_name"],
                     hits=type_info["hits"],
@@ -239,6 +243,7 @@ def build_results(
                     mode=mode,
                     rows_analysed=rows_analysed,
                     column=finding["column"],
+                        column_index=finding["index"],
                     privacy_type=ai["privacy_type"],
                     display_name=ai["privacy_type"],
                     hits=0,
