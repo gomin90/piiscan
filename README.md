@@ -116,7 +116,7 @@ piiscan-model-0.8b.zip   508.6 MB   0.8B v3 GGUF + tokenizer
 piiscan-model-2b.zip    1219.1 MB   2B v4 GGUF + tokenizer
 ```
 
-Published at [release v0.4.0](https://github.com/gomin90/piiscan/releases/tag/v0.4.0).
+Published at [release v0.5.0](https://github.com/gomin90/piiscan/releases/tag/v0.5.0).
 Build them yourself with `python tools/make_release_bundle.py --split`, then check integrity with
 `scripts/windows/verify-offline-bundle.ps1`.
 
