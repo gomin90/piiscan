@@ -5,6 +5,12 @@ supporting evidence. A column being "not a privacy column" never cancels a cell
 that a detector confirmed, it only changes how confident that cell verdict is and
 whether it is flagged for review.
 
+Two-stage verdict: while a file streams, a column's support ratio is only a prefix
+of the finished column, so using it during the scan would make the same cell
+verdict depend on the order the rows happened to arrive in. Cells are therefore
+recorded with their own evidence and the final, order-independent support ratio is
+applied when the scan is complete.
+
 Raw personal values are never stored here: every value reaching a record is the
 output of `mask_value()`.
 """
@@ -18,6 +24,12 @@ CELL_REVIEW_THRESHOLD = 0.60
 # A cell that only loosely resembles a pattern and has no supporting signal is
 # not reported as a hit; it is counted in the diagnostics only.
 IGNORE_VERDICT = "형식 유사(무시)"
+
+# Row statuses. The three states are mutually exclusive and are what the UI and
+# the exports report: confirmed evidence, plausible-but-unsettled evidence, none.
+STATUS_CONFIRMED = "확정"
+STATUS_POSSIBLE = "검토 필요"
+STATUS_NONE = "없음"
 
 # Types that identify a person on their own, without any other column.
 DIRECT_IDENTIFIER_TYPES = {
@@ -40,7 +52,7 @@ IDENTIFYING_PAIRS = (
     ({"EMAIL", "PHONE_NUMBER"}, "이메일 + 전화번호"),
     ({"NAME", "CARD_NUMBER"}, "이름 + 카드번호"),
     ({"NAME", "BANK_ACCOUNT"}, "이름 + 계좌번호"),
-    ({"ADDRESS", "POSTCODE"}, "상세주소 + 우편번호"),
+    ({"ADDRESS", "POSTCODE"}, " 상세주소 + 우편번호"),
     ({"BIRTH_DATE", "PHONE_NUMBER"}, "생년월일 + 전화번호"),
 )
 
@@ -86,6 +98,18 @@ class CellRecord:
             "column_support": round(self.column_support, 4),
         }
 
+    @classmethod
+    def from_row(cls, raw: dict) -> "CellRecord":
+        return cls(
+            row=raw["row"], column_index=raw["column_index"], column=raw["column"],
+            type_key=raw["type_key"], display_name=raw["display_name"],
+            confidence=raw["confidence"], masked_value=raw["masked_value"],
+            evidence=raw["evidence"], confirmed=raw["confirmed"], masked=raw["masked"],
+            sensitivity=raw["sensitivity"], priority=raw["priority"],
+            decision=raw["decision"], needs_review=raw["needs_review"],
+            column_support=raw["column_support"],
+        )
+
 
 def cell_decision(confidence: float, confirmed: bool, column_support: float = 0.0,
                   name_hint: float = 0.0) -> tuple[str, float, bool]:
@@ -94,6 +118,8 @@ def cell_decision(confidence: float, confirmed: bool, column_support: float = 0.
     Returns (verdict, confidence, needs_review). Three verdicts are possible:
     ``개인정보`` (confirmed and confident), ``검토 필요`` (plausible but not
     settled), ``형식 유사(무시)`` (only a loose pattern match with no support).
+    ``column_support`` must be the ratio over the **whole** column, not a prefix,
+    otherwise the verdict would depend on row order.
     """
     if column_support >= 0.8:
         confidence += 0.06
@@ -113,7 +139,6 @@ def cell_decision(confidence: float, confirmed: bool, column_support: float = 0.
 
 def analyse_row(cells: list[CellRecord]) -> dict:
     """Combine the cell verdicts of one row into a row-level verdict."""
-    types = {cell.type_key for cell in cells}
     confirmed_types = {cell.type_key for cell in cells if cell.decision == "개인정보"}
     review_types = {cell.type_key for cell in cells if cell.needs_review}
 
@@ -138,7 +163,8 @@ def analyse_row(cells: list[CellRecord]) -> dict:
     score = 0.0
     score += DIRECT_WEIGHT * len(direct)
     score += COMBINATION_WEIGHT * len(set(combinations))
-    score += 0.5 * len(confirmed_types - DIRECT_IDENTIFIER_TYPES - {t for pair, _ in IDENTIFYING_PAIRS for t in pair if t in confirmed_types})
+    score += 0.5 * len(confirmed_types - DIRECT_IDENTIFIER_TYPES
+                       - {t for pair, _ in IDENTIFYING_PAIRS for t in pair if t in confirmed_types})
     score += REVIEW_WEIGHT * len(review_types)
 
     if score >= 5.0:
@@ -152,14 +178,24 @@ def analyse_row(cells: list[CellRecord]) -> dict:
     else:
         level = "낮음"
 
+    if confirmed_types:
+        status = STATUS_CONFIRMED
+    elif review_types:
+        status = STATUS_POSSIBLE
+    else:
+        status = STATUS_NONE
+
     return {
         "has_pii": bool(confirmed_types or review_types),
+        "status": status,
+        "confirmed_pii": sorted(confirmed_types),
+        "possible_pii": sorted(review_types),
         "pii_types": sorted(confirmed_types),
         "review_types": sorted(review_types),
+        "needs_review": bool(review_types),
         "basis": " | ".join(basis) or "개인정보 Cell 없음",
         "row_score": round(score, 2),
         "risk_level": level,
-        "needs_review": bool(review_types),
     }
 
 
@@ -172,6 +208,9 @@ class RowRecord:
     cells: list[CellRecord] = field(default_factory=list)
     pii_types: list[str] = field(default_factory=list)
     review_types: list[str] = field(default_factory=list)
+    confirmed_pii: list[str] = field(default_factory=list)
+    possible_pii: list[str] = field(default_factory=list)
+    status: str = STATUS_NONE
     column_names: list[str] = field(default_factory=list)
     column_indexes: list[int] = field(default_factory=list)
     basis: str = ""
@@ -179,18 +218,22 @@ class RowRecord:
     needs_review: bool = False
     risk_level: str = "낮음"
     cells_checked: int = 0
+    cell_count: int = 0
     ai_review: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {
             "row": self.row,
             "has_pii": self.has_pii,
+            "status": self.status,
+            "confirmed_pii": self.confirmed_pii,
+            "possible_pii": self.possible_pii,
             "pii_types": self.pii_types,
             "review_types": self.review_types,
             "columns": self.column_names,
             "column_indexes": self.column_indexes,
             "cells": [cell.as_dict() for cell in self.cells],
-            "cell_count": len(self.cells),
+            "cell_count": self.cell_count,
             "basis": self.basis,
             "confidence": round(self.confidence, 3),
             "needs_review": self.needs_review,
@@ -198,3 +241,16 @@ class RowRecord:
             "cells_checked": self.cells_checked,
             "ai_review": self.ai_review,
         }
+
+    @classmethod
+    def from_row(cls, raw: dict) -> "RowRecord":
+        return cls(
+            row=raw["row"], has_pii=raw["has_pii"], status=raw["status"],
+            confirmed_pii=raw["confirmed_pii"], possible_pii=raw["possible_pii"],
+            pii_types=raw["confirmed_pii"], review_types=raw["possible_pii"],
+            column_names=raw["column_names"], column_indexes=raw["column_indexes"],
+            basis=raw["basis"], confidence=raw["confidence"],
+            needs_review=raw["needs_review"], risk_level=raw["risk_level"],
+            cells_checked=raw["cells_checked"], cell_count=raw["cell_count"],
+            ai_review=raw["ai_review"],
+        )

@@ -23,4 +23,4 @@ class ImsiDetector(Detector):
             # 15자 + Luhn 통과값은 IMEI detector가 확정한다 (Luhn이 IMEI의 정의 조건).
             return None
         return Match(self.type_key, self.display_name, 0.85,
-                     evidence=f"MCC {v[:3]} + 15자리 IMSI", priority=self.priority, sensitivity=self.sensitivity)
+                     evidence="MCC(3자리) + 15자리 IMSI 형식", priority=self.priority, sensitivity=self.sensitivity)

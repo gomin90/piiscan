@@ -33,5 +33,5 @@ class CreditCardDetector(Detector):
             return None
         valid = luhn_valid(digits)
         return Match(self.type_key, self.display_name, 0.99 if valid else 0.7,
-                     evidence=f"BIN {digits[:4]} + Luhn {'valid' if valid else 'invalid'}",
+                     evidence=f"카드 BIN 형식 + Luhn {'valid' if valid else 'invalid'}",
                      priority=self.priority, sensitivity=self.sensitivity)

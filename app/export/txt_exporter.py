@@ -22,7 +22,7 @@ def write_txt(file_results: list, output: str | Path) -> str:
 
     total_rows = sum(result.rows_parsed for result in file_results)
     total_cells = sum(result.cell_counts.get("cells_inspected", 0) for result in file_results)
-    pii_rows = sum(len(result.row_records) for result in file_results)
+    pii_rows = sum(result.cell_counts.get("detail_rows_stored", 0) for result in file_results)
     pii_columns = sum(1 for result in file_results for r in result.results)
     high_risk = sum(1 for result in file_results for r in result.results if r.risk_level in ("매우 높음", "높음"))
     lines.append("")
@@ -43,28 +43,44 @@ def write_txt(file_results: list, output: str | Path) -> str:
         lines.append(f"  분석 방식: {result.settings.get('mode')} | 분석 행: {result.rows_parsed:,} (오류 {result.rows_error}, 빈 행 {result.rows_empty})")
         lines.append(f"  소요 시간: {result.elapsed_seconds:.2f}s | AI: {result.ai_summary.get('status', '미사용')}")
         counts = result.cell_counts
+        rows_short = counts.get("rows_short", result.rows_short)
         lines.append(
             f"  Row/Cell 검사: Row {counts.get('rows_inspected', 0):,} / Cell {counts.get('cells_inspected', 0):,} "
             f"(빈 Cell {counts.get('empty_cells', 0):,}, 규칙 호출 {counts.get('detector_calls', 0):,}, "
-            f"Cell hit {counts.get('cell_hits', 0):,})"
+            f"Cell hit {counts.get('cell_hits', 0):,}, 불규칙 Row {result.rows_irregular:,} "
+            f"(필드 부족 {result.rows_short:,} / 필드 초과 {result.rows_extra:,}, 초과 Cell {counts.get('extra_cells', 0):,})"
         )
+        lines.append(
+            f"  판정: Cell {counts.get('pii_cells', 0):,} 개인정보 / {counts.get('review_cells', 0):,} 검토 필요 / "
+            f"{counts.get('ignored_cells', 0):,} 형식 유사(무시)"
+        )
+        lines.append(
+            f"  상세 저장: Row {counts.get('detail_rows_stored', 0):,} / Cell {counts.get('detail_cells_stored', 0):,} "
+            f"(RAM 캐시 {counts.get('detail_cache_rows', 0):,} Row, 상한 {counts.get('detail_cache_limit', 0):,}, "
+            f"저장 위치 {counts.get('detail_store', '')})"
+        )
+        audit = result.ai_audit
+        if audit:
+            row_audit = audit.get("row", {})
+            lines.append(
+                f"  AI 판단: 컬럼 {audit.get('attempts', 0)} 시도(성공 {audit.get('success', 0)}, "
+                f"실패 {audit.get('failed', 0)}, 생략 {audit.get('skipped', 0)}, 정책 {audit.get('policy')}, "
+                f"한도 {audit.get('limit', 0)} | Row {row_audit.get('attempts', 0)} 시도"
+                f"(성공 {row_audit.get('success', 0)}, 실패 {row_audit.get('failed', 0)}, "
+                f"생략 {row_audit.get('skipped', 0)})"
+            )
         if result.row_records:
-            lines.append(f"  [Row 단위 판정] 개인정보 포함 Row {len(result.row_records)}건")
+            lines.append("  [Row 단위 판정 예시]")
             for record in result.row_records[:20]:
-                types = ", ".join(record.pii_types + record.review_types)
                 where = ", ".join(f"{cell.column}(#{cell.column_index})" for cell in record.cells[:5])
                 lines.append(
-                    f"    Row {record.row}: {'개인정보' if record.has_pii else '없음'} | {types} | "
-                    f"{where} | 근거: {record.basis} | 신뢰도 {record.confidence:.2f} | "
-                    f"위험도 {record.risk_level} | {'검토 필요' if record.needs_review else '확정'}"
+                    f"    Row {record.row}: {record.status} | 확정: {', '.join(record.confirmed_pii) or '없음'} | "
+                    f"검토: {', '.join(record.possible_pii) or '없음'} | {where} | "
+                    f"근거: {record.basis} | 신뢰도 {record.confidence:.2f} | 위험도 {record.risk_level}"
                 )
-            if len(result.row_records) > 20:
-                lines.append(f"    ... 나머지 {len(result.row_records) - 20}건은 privacy_rows CSV 참조")
-        elif counts.get("detail_truncated_rows"):
-            lines.append(
-                f"  Row 상세 상한({counts.get('detail_limit', 0)}) 초과: {counts['detail_truncated_rows']} Row 생략 "
-                "(Row/Cell 수는 그대로 집계됨)"
-            )
+            stored = counts.get("detail_rows_stored", 0)
+            if stored > 20:
+                lines.append(f"    ... 나머지 {stored - 20}건은 privacy_hits CSV 참조 (전량 SQLite 상세 저장)")
         if result.protection:
             lines.append("  [보호(MASK/HASH/ENC) 컬럼]")
             for group in result.protection:

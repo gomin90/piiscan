@@ -442,8 +442,9 @@ class JevStyleAdapter:
         This is a bounded call: it is used for rows the rule engine could not
         settle, never for every cell.
         """
-        cells = record.get("cells", []) or []
-        samples = [str(cell.get("value", "")) for cell in cells][:MAX_SAMPLES]
+        from app.ai.prompt_manager import _ranked_cells
+        cells = _ranked_cells(record.get("cells", []) or [])
+        samples = [str(cell.get("value", "") or cell.get("masked_value", "")) for cell in cells][:MAX_SAMPLES]
         state = build_column_state({
             "column": f"ROW {record.get('row', '')}",
             "schema": record.get("schema", ""),
@@ -460,6 +461,9 @@ class JevStyleAdapter:
                 "samples": samples,
             },
             "related_columns": [str(cell.get("column", "")) for cell in cells],
+            "confirmed_types": record.get("confirmed_types", []),
+            "possible_types": record.get("possible_types", []),
+            "risk_level": record.get("risk_level", ""),
         })
         request = JevStyleDecisionRequest("row_context", state, ROW_PERSONALITY_QUESTION,
                                          PERSONALITY_OPTIONS, "choice", GENERAL_CATEGORY)

@@ -54,6 +54,9 @@ class CsvLoader:
         self.error_rows = 0
         self.empty_rows = 0
         self.irregular_rows = 0
+        self.short_rows = 0
+        self.extra_rows = 0
+        self.max_extra_fields = 0
         self.column_count = 0
         self.column_names: list[str] = []
         self.total_rows: int | None = None
@@ -63,8 +66,7 @@ class CsvLoader:
         """Resolve column names from the header, or generate COL_001 style names."""
         with open(self.settings.path, "r", encoding=self.settings.encoding, errors="replace", newline="") as handle:
             rows = []
-            for line in handle:
-                parsed = next(csv.reader([line], delimiter=self.settings.delimiter))
+            for parsed in csv.reader(handle, delimiter=self.settings.delimiter):
                 if parsed and any(cell.strip() for cell in parsed):
                     rows.append(parsed)
                 if len(rows) >= 5:
@@ -106,14 +108,20 @@ class CsvLoader:
         return self.settings.header_start_row
 
     def iter_rows(self):
-        """Yield (row_index, row) with rows padded/truncated to the column count."""
+        """Yield (row_index, row).
+
+        Short rows are padded to the header width. Rows with *more* fields than the
+        header are yielded intact: truncating them would discard cells that may hold
+        personal data, so the extra fields are analysed as EXTRA_COL_n columns and the
+        row is reported as irregular.
+        """
         with open(self.settings.path, "r", encoding=self.settings.encoding, errors="replace", newline="") as handle:
+            reader = csv.reader(handle, delimiter=self.settings.delimiter)
             for _ in range(self.rows_to_skip()):
                 try:
-                    next(handle)
+                    next(reader)
                 except StopIteration:
                     break
-            reader = csv.reader(handle, delimiter=self.settings.delimiter)
             index = 0
             for raw in reader:
                 if not raw or all(not cell.strip() for cell in raw):
@@ -121,12 +129,14 @@ class CsvLoader:
                     continue
                 try:
                     width = len(raw)
+                    if width < self.column_count:
+                        self.short_rows += 1
+                        raw = raw + [""] * (self.column_count - width)
+                    elif width > self.column_count:
+                        self.extra_rows += 1
+                        self.max_extra_fields = max(self.max_extra_fields, width - self.column_count)
                     if width != self.column_count:
                         self.irregular_rows += 1
-                        if width < self.column_count:
-                            raw = raw + [""] * (self.column_count - width)
-                        else:
-                            raw = raw[: self.column_count]
                     self.parsed_rows += 1
                     yield index, raw
                     index += 1

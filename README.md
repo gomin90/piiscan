@@ -34,7 +34,9 @@ python app/main.py --folder /data/csv --no-ai --debug
 
 Options: `--encoding`, `--delimiter`, `--header`, `--batch-size`, `--mode
 (auto|sampling|full)`, `--no-ai`, `--cpu-only`, `--jev-model`, `--debug`, `--json`,
-`--report-json <path>`, `--gui`.
+`--report-json <path>`, `--gui`, plus the detail/AI controls `--detail-store`,
+`--max-detail-rows`, `--max-detail-cells`, `--max-ai-row-reviews`,
+`--max-ai-column-reviews`, `--ai-column-reviews (selective|all|none)`.
 
 ## Features
 
@@ -48,8 +50,11 @@ Options: `--encoding`, `--delimiter`, `--header`, `--batch-size`, `--mode
   rule engine, and each hit is reported with row number, column index, type,
   masked value, cell verdict, confidence and the row-context basis (e.g.
   "이름 + 전화번호" in the same record). A column being classified as non-privacy
-  never suppresses a confirmed cell hit. Ambiguous rows are sent to the AI layer
-  only, up to `max_ai_row_reviews` times per file.
+  never suppresses a confirmed cell hit. Every row/cell verdict is written to a
+  SQLite detail store, so the GUI can paginate and export all of them while RAM
+  keeps only a bounded cache. Ambiguous rows are sent to the AI layer only, up to
+  `max_ai_row_reviews` times per file; column judgements are selective (columns
+  already settled by rules are skipped) and audited.
 - MASK/HASH/ENC column relationship analysis with value-level verification.
 - Code-group (GROUP_CODE/CODE/CODE_NAME) semantic analysis.
 - Jev-Style Decision Model (0.8B v3 / 2B v4, GGUF) 로컬 판정 엔진: State+Question+

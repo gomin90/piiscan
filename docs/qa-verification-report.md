@@ -331,7 +331,72 @@ device table을 실제 exe에서 dump한다.
 
 ---
 
-## 8. 미해결 · 운영 제약
+---
+
+## 9. v0.5.0 코드 리뷰 후속 개선 (P0-P2) 실측
+
+측정 host: macOS Apple Silicon (18 cores, 64 GB RAM, Metal backend). Windows / RTX 5060
+실측은 이 host에서 불가 → **미검증**으로 남긴다.
+
+### 9.1 수정 내역과 근거
+
+| # | 문제 | 수정 | 검증 (실제 실행) |
+|---|---|---|---|
+| P0 | 모든 finding 컬럼에 AI `judge_column()` | `ai_column_candidates()` 정책(selective/all/none) + `max_ai_column_reviews`, audit counters | `test_ai_column_review_is_selective_and_audited`, `test_ai_optimisation_does_not_change_cell_detection` |
+| P1 | `max_detail_rows`(5,000) 초과 시 Cell 상세 누락 | SQLite detail store + 페이지 조회, export는 store 기반 | `test_detail_store_preserves_every_hit_and_export_matches` (6,000 Row → 6,000 저장, export 6,000건 일치) |
+| P1 | Ragged Row 초과 필드 `raw[:column_count]`로 버림 | `EXTRA_COL_n` 가변 컬럼으로 검사, short/extra 집계 | `test_ragged_rows_keep_extra_fields_and_detect_pii` |
+| P1 | Cell 판정이 streaming prefix ratio에 의존 | two-phase: evidence 저장 → 스캔 완료 후 `finalise_verdicts()` | `test_cell_verdicts_do_not_depend_on_row_order`, `test_order_independence_keeps_counts_stable` |
+| P1 | `has_pii`가 확정/검토를 혼동 | `STATUS_CONFIRMED` / `STATUS_POSSIBLE` / `STATUS_NONE` + UI·export 열 | `test_confirmed_and_review_rows_are_reported_separately` |
+| P2 | Row AI 문맥 = 첫 8 Cell | `_ranked_cells()` (확정→검토→유형 diversity→위험도), 12 cap | `test_row_ai_context_is_masked_and_risk_ordered` |
+| P2 | AI Row 후보 = detail cache 앞부분 bias | `store.review_rows()` stride sample + candidates/skipped 보고 | `test_row_ai_calls_are_capped_and_counted` (max row > 20 확인) |
+| P2 | `max_distinct_tracked` 미적용, 10,000 컬럼 메모리 | 컬럼 수로 distinct budget 나누기, HLL precision 10 | scenario E peak RSS 1,970 MB → 820 MB (see 9.2) |
+| P2 | Quote/newline 있는 CSV header·delimiter 오 해석 | `logical_rows()` (csv.reader) 기반 delimiter/header detection | `test_quoted_and_multiline_fields_are_parsed_consistently` |
+| P2 | Excel formula injection, evidence 원문 조각 | `utils/csv_safety.formula_safe()` every text field; credit_card/IMSI evidence scrub | `test_exported_cells_are_formula_safe`, `test_detector_evidence_contains_no_raw_privacy_text` |
+
+### 9.2 Scenario matrix (rows x columns)
+
+`tools/perf_matrix.py --scenarios A,B,C,D,E,F --ai none|selective|all`. Fixture: every 5th
+column holds a 주민등록형 value, the rest are non-personal numeric/alpha values, so both FP
+and FN are measurable.
+
+| AI | # | Shape | Cell 검사 | Cell hit | SQLite Cell | RAM cache cell | Store | Cell P/R/F1 | Row P/R/F1 |
+|---|---|---|---|---|---|---|---|---|---|
+| none | A | 100x100 | 10,000 | 2,000 | 2,000 | 2,000 | 0.0 MB | 1.00/1.00/1.00 | 1.00/1.00/1.00 |
+| none | B | 100x1,000 | 100,000 | 20,000 | 20,000 | 20,000 | 3.7 MB | 1.00/1.00/1.00 | 1.00/1.00/1.00 |
+| none | C | 100x10,000 | 1,000,000 | 200,000 | 200,000 | 50,000 | 37.4 MB | 1.00/1.00/1.00 | 1.00/1.00/1.00 |
+| none | D | 1,000x1,000 | 1,000,000 | 200,000 | 200,000 | 50,000 | 38.1 MB | 1.00/1.00/1.00 | 1.00/1.00/1.00 |
+| none | E | 1,000x10,000 | 10,000,000 | 2,000,000 | 2,000,000 | 50,000 | 377.5 MB | 1.00/1.00/1.00 | 1.00/1.00/1.00 |
+| none | F | 10,000x100 | 1,000,000 | 200,000 | 200,000 | 50,000 | 37.5 MB | 1.00/1.00/1.00 | 1.00/1.00/1.00 |
+| selective | A-F | same | same | same | same | ≤50,000 | same | 1.00/1.00/1.00 | 1.00/1.00/1.00 |
+| all | A-F | same | same | same | same | ≤50,000 | same | 1.00/1.00/1.00 | 1.00/1.00/1.00 |
+
+Row/Cell P/R/F1과 hit 수는 none / selective / all 세 모드에서 identical → AI selection이
+Cell recall를 줄이지 않는다 (test `test_ai_off_and_selective_ai_find_the_same_cells`).
+
+Rule-only wall time (FakeScorer): A 0.98 s, B 1.51 s, C 7.59 s, D 7.09 s, E 62.30 s, F 6.75 s.
+
+AI inference with the **real** Jev-Style 0.8B scorer (Metal):
+* D (1,000 x 1,000): 200 column + 100 row judgements = 300 inferences, 58.7 s AI, 68.7 s total, RSS +303 MB
+* E (1,000 x 10,000): 300 inferences, 39.4 s AI, 103.7 s total, RSS +139.5 MB, store 377.5 MB
+
+### 9.3 Memory before/after (scenario E, rules only, separate processes)
+
+| max_detail_cells | Peak RSS | Cached cells | Stored cells | Store size |
+|---|---|---|---|---|
+| 2,000,000 (unbounded) | 1,970 MB | 2,000,000 | 2,000,000 | 378 MB |
+| 50,000 (default) | 820 MB | 50,000 | 2,000,000 | 378 MB |
+
+Detail completeness is unchanged; only the in-memory cache shrank.
+
+### 9.4 Suite 결과
+
+* `pytest tests -q` (bundle manifest 포함): **151 passed** (was 128 at v0.4.0).
+* `tests/qa/test_review_fixes.py`: 16 passed.
+* `tests/performance/test_scenario_matrix.py`: A/B/D/F + AI-off vs AI-on equality: passed.
+* GUI headless pagination test passed; offscreen screenshot shows the Row/Cell detail tables and
+  "Row 상세 N건 저장됨 (SQLite) - 페이지 x/y" label.
+
+## 10. 미해결 · 운영 제약
 
 1. **GGUF model binary 없음** → model load time·추론 속도·model memory 모두 미실측.
 2. **llama-cpp-python 미설치** → llama.cpp path is 실행d only through fake-module tests.

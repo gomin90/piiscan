@@ -3,15 +3,25 @@
 Combines regex patterns, checksums, data statistics and column-name meaning.
 Each detector is independent, so a new privacy type only needs a new detector
 class registered in `build_detectors`.
+
+Two phases:
+
+1. **Scan** - every non-empty cell of every row is inspected by the rule engine and
+   every match is streamed, as raw evidence, to the detail store (SQLite).
+2. **Verdict** - once the whole column is known, each match is judged with its own
+   evidence plus the finished column ratio. Verdicts therefore do not depend on the
+   order the rows were read in.
 """
 from __future__ import annotations
 
+import tempfile
 import time
-from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 from app.config.settings import AnalysisConfig
 from app.core.column_stats import ColumnStats
+from app.core.detail_store import DetailStore
 from app.core.row_analysis import (
     IGNORE_VERDICT,
     CellRecord,
@@ -49,26 +59,24 @@ from app.utils.masking import mask_value
 
 NULL_TOKENS = {"", "null", "NULL", "n/a", "N/A", "-"}
 
-# Number of matched rows kept per (column, type) for the row-level detail output.
+# Number of matched rows kept per (column, type) for the column-level detail output.
 DETAIL_ROW_LIMIT = 20
-
-
-def hit_rows_for(column: ColumnStats, type_key: str, limit: int = DETAIL_ROW_LIMIT) -> list[dict]:
-    """Row numbers of the values that matched, with masked values only."""
-    return column.hit_rows.get(type_key, [])[:limit]
-
-# A column is only declared to *be* a privacy column when the matching values
-# dominate the column. A detector that fires on a handful of rows of a mostly
-# ordinary column (AMOUNT matching the postcode pattern, DEPT matching a Korean
-# name pattern) is evidence of a coincidence, not of personal data.
-DOMINANT_RATIO = 0.50          # majority of the non-empty values match
-HINTED_RATIO = 0.30            # column name also hints at this type
-WEAK_RATIO = 0.20              # below this the hit is not reported at all
 
 # Columns whose names say "internal record key" (NO/ID/CD/CODE/SEQ) are not
 # personal data just because the values happen to look like an ID format.
 IDENTIFIER_NAME_TOKENS = ("no", "id", "cd", "code", "seq", "num", "key", "ref")
 GENERIC_CONFIDENCE = 0.85      # below this the pattern alone is not conclusive
+
+# Dominance test for the *column-level* verdict: a column is declared a privacy
+# column only when the matching values dominate it and that content is confirmed.
+DOMINANT_RATIO = 0.50
+HINTED_RATIO = 0.30
+WEAK_RATIO = 0.20
+
+
+def hit_rows_for(column: ColumnStats, type_key: str, limit: int = DETAIL_ROW_LIMIT) -> list[dict]:
+    """Row numbers of the values that matched, with masked values only."""
+    return column.hit_rows.get(type_key, [])[:limit]
 
 
 def build_detectors(config: AnalysisConfig | None = None) -> list[Detector]:
@@ -99,43 +107,42 @@ def build_detectors(config: AnalysisConfig | None = None) -> list[Detector]:
         IpAddressDetector(),
         PostcodeDetector(),
     ]
-    by_tag: dict[str, list[Detector]] = {}
-    for detector in detectors:
-        for tag in detector.candidate_tags:
-            by_tag.setdefault(tag, []).append(detector)
     return detectors
 
 
 class PrivacyEngine:
-    def __init__(self, config: AnalysisConfig | None = None):
+    def __init__(self, config: AnalysisConfig | None = None, store: DetailStore | None = None):
         self.config = config or AnalysisConfig()
         self.detectors = build_detectors(self.config)
         self.tag_detectors: dict[str, list[Detector]] = {}
         for detector in self.detectors:
             for tag in detector.candidate_tags:
                 self.tag_detectors.setdefault(tag, []).append(detector)
+        self.by_type = {detector.type_key: detector for detector in self.detectors}
         self.elapsed_rules = 0.0
         self.rows_analysed = 0
-        # Cell/row bookkeeping. Every non-empty cell is inspected by the rule
-        # engine; the counts below make "cells checked" and "AI decisions"
-        # separately auditable.
+        self.store = store or DetailStore(Path(tempfile.mkdtemp(prefix="piiscan-detail-")) / "detail.sqlite")
+        # Raw scan counters - always exact, no detail cap applies to them.
         self.rows_inspected = 0
         self.cells_inspected = 0
         self.empty_cells = 0
+        self.extra_cells = 0
+        self.extra_columns = 0
+        self.header_count = 0
         self.detector_calls = 0
-        # row number -> every detector hit in that row, in column order.
-        self.row_cells: dict[int, list[CellRecord]] = {}
-        self.row_widths: dict[int, int] = {}
-        self.column_cells: dict[int, list[CellRecord]] = {}
-        self.rows_with_hits = 0
-        self.last_hit_row = 0
-        self.last_truncated_row = 0
         self.cell_hits = 0
+        self.rows_with_hits = 0
+        # Final verdict counters - filled by finalise_verdicts().
         self.pii_cells = 0
         self.review_cells = 0
         self.ignored_cells = 0
-        self.detail_truncated_rows = 0
+        # Bounded in-memory view of the verdicts for the GUI overview.
+        self.row_verdicts: dict[int, RowRecord] = {}
+        self.cached_cells = 0
         self._tag_cache: dict[frozenset[str], tuple[Detector, ...]] = {}
+        # Rows are streamed in order, so the last row that produced a hit is all
+        # that is needed to count distinct rows with hits (no unbounded set).
+        self._last_hit_row = 0
 
     def _detectors_for(self, tags: frozenset[str]) -> tuple[Detector, ...]:
         """Detectors that could apply to a value, cached per character profile."""
@@ -153,72 +160,25 @@ class PrivacyEngine:
         self._tag_cache[tags] = result
         return result
 
-    def _record_cell(self, row: int, index: int, column: ColumnStats, match, masked: str,
-                     detector: Detector, width: int) -> None:
-        """Judge one cell hit and, if it is worth reporting, add it to the ledger.
-
-        The verdict comes from the cell's own evidence first; how dominant the
-        pattern is in the column and whether the column name hints at that type
-        only adjust confidence. A column that is not classified as personal data
-        can never cancel a cell hit.
-        """
-        hit = column.hits.get(match.type_key)
-        support = hit.count / column.non_empty if hit and column.non_empty else 0.0
-        hint = detector.column_affinity(column.name)
-        decision, confidence, needs_review = cell_decision(match.confidence, match.confirmed, support, hint)
-
-        if decision == IGNORE_VERDICT:
-            self.ignored_cells += 1
-            return
-
-        if decision == "개인정보":
-            self.pii_cells += 1
-        else:
-            self.review_cells += 1
-        self.cell_hits += 1
-
-        cells = self.row_cells.get(row)
-        if row != self.last_hit_row:
-            self.last_hit_row = row
-            self.rows_with_hits += 1
-        if cells is None:
-            if len(self.row_cells) >= self.config.max_detail_rows:
-                if row != self.last_truncated_row:
-                    self.last_truncated_row = row
-                    self.detail_truncated_rows += 1
-                return
-            cells = []
-            self.row_cells[row] = cells
-            self.row_widths[row] = width
-        cell = CellRecord(
-            row=row,
-            column_index=index,
-            column=column.name,
-            type_key=match.type_key,
-            display_name=match.display_name,
-            confidence=round(confidence, 3),
-            masked_value=masked,
-            evidence=match.evidence,
-            confirmed=match.confirmed,
-            masked=match.masked,
-            sensitivity=match.sensitivity,
-            priority=match.priority,
-            decision=decision,
-            needs_review=needs_review,
-            column_support=round(support, 4),
-        )
-        cells.append(cell)
-        self.column_cells.setdefault(index, []).append(cell)
-
     def process_batch(self, stats: list[ColumnStats], rows: list[list[str]]) -> None:
+        """Scan every cell of every row.
+
+        A row with more fields than the header keeps its extra fields: they become
+        EXTRA_COL_n columns and are scanned like any other cell, so personal data
+        that happens to sit past the declared header is never silently dropped.
+        """
         started = time.perf_counter()
         first_row = self.rows_analysed + 1
         for offset, row in enumerate(rows, start=first_row):
             self.rows_inspected += 1
-            width = min(len(row), len(stats))
+            width = len(row)
+            if width > len(stats):
+                self.extra_cells += width - len(stats)
+                for index in range(len(stats), width):
+                    stats.append(ColumnStats(name=f"EXTRA_COL_{index + 1}", index=index,
+                                            max_hit_rows=self.config.max_hit_rows))
+                self.extra_columns = max(self.extra_columns, width - self.header_count)
             for index, value in enumerate(row):
-                if index >= len(stats):
-                    continue
                 column = stats[index]
                 profile = profile_of(value)
                 column.record(value, profile)
@@ -232,33 +192,114 @@ class PrivacyEngine:
                     if match is not None:
                         masked = mask_value(value)
                         column.add_hit(match, offset, masked)
-                        # Cell evidence is recorded independently of whether the
-                        # column as a whole is classified as personal data.
-                        self._record_cell(offset, index, column, match, masked, detector, width)
+                        self.cell_hits += 1
+                        if offset > self._last_hit_row:
+                            self._last_hit_row = offset
+                            self.rows_with_hits += 1
+                        self.store.add_raw_cell(offset, index, column.name, match, masked,
+                                               detector.column_affinity(column.name), width)
         self.rows_analysed += len(rows)
         self.elapsed_rules += time.perf_counter() - started
 
-    def row_records(self) -> list[RowRecord]:
-        """Row-level verdicts: one record per row that contained at least one hit."""
-        records = []
-        for row, cells in sorted(self.row_cells.items()):
-            context = analyse_row(cells)
-            records.append(
-                RowRecord(
-                    row=row,
-                    has_pii=context["has_pii"],
-                    cells=cells,
-                    pii_types=context["pii_types"],
-                    review_types=context["review_types"],
-                    column_names=sorted({cell.column for cell in cells}),
-                    column_indexes=sorted({cell.column_index for cell in cells}),
-                    basis=context["basis"],
-                    confidence=max((cell.confidence for cell in cells), default=0.0),
-                    needs_review=context["needs_review"],
-                    risk_level=context["risk_level"],
-                    cells_checked=self.row_widths.get(row, len(cells)),
+    def finalise_verdicts(self, stats: list[ColumnStats]) -> list[RowRecord]:
+        """Judge every recorded hit with the finished column ratio.
+
+        Streams the detail store in row order, so RAM is bounded by the number of
+        hits in a single row while the full evidence keeps its final verdict.
+        """
+        support: dict[tuple[int, str], float] = {}
+        for column in stats:
+            for hit in column.hits.values():
+                support[(column.index, hit.type_key)] = (
+                    hit.count / column.non_empty if column.non_empty else 0.0
                 )
+
+        current_row: int | None = None
+        width = 0
+        cells: list[CellRecord] = []
+        pending: list[tuple] = []
+        for raw in self.store.iter_raw_cells():
+            ratio = support.get((raw["column_index"], raw["type_key"]), 0.0)
+            decision, confidence, needs_review = cell_decision(
+                raw["confidence"], raw["confirmed"], ratio, raw["name_hint"]
             )
+            if decision == IGNORE_VERDICT:
+                self.ignored_cells += 1
+                continue
+            if decision == "개인정보":
+                self.pii_cells += 1
+            else:
+                self.review_cells += 1
+            if current_row is None or current_row != raw["row"]:
+                if current_row is not None:
+                    self._flush_row(cells, width)
+                current_row = raw["row"]
+                width = raw["cells_checked"]
+                cells = []
+            pending.append((decision, round(confidence, 3), int(needs_review), round(ratio, 4), raw["id"]))
+            if len(pending) >= 1000:
+                self.store.set_verdicts(pending)
+                pending.clear()
+            cells.append(CellRecord(
+                row=raw["row"], column_index=raw["column_index"], column=raw["column"],
+                type_key=raw["type_key"], display_name=raw["display_name"],
+                confidence=round(confidence, 3), masked_value=raw["masked_value"],
+                evidence=raw["evidence"], confirmed=raw["confirmed"], masked=raw["masked"],
+                sensitivity=raw["sensitivity"], priority=raw["priority"],
+                decision=decision, needs_review=needs_review, column_support=round(ratio, 4),
+            ))
+
+        if current_row is not None:
+            self._flush_row(cells, width)
+        if pending:
+            self.store.set_verdicts(pending)
+        self.store.flush()
+        return list(self.row_verdicts.values())
+
+    def _flush_row(self, cells: list[CellRecord], width: int) -> None:
+        context = analyse_row(cells)
+        record = RowRecord(
+            row=cells[0].row,
+            has_pii=context["has_pii"],
+            cells=cells,
+            pii_types=context["pii_types"],
+            review_types=context["review_types"],
+            confirmed_pii=context["confirmed_pii"],
+            possible_pii=context["possible_pii"],
+            status=context["status"],
+            column_names=sorted({cell.column for cell in cells}),
+            column_indexes=sorted({cell.column_index for cell in cells}),
+            basis=context["basis"],
+            confidence=max((cell.confidence for cell in cells), default=0.0),
+            needs_review=context["needs_review"],
+            risk_level=context["risk_level"],
+            cells_checked=width,
+            cell_count=len(cells),
+        )
+        self.store.write_row_detail(record)
+        if len(self.row_verdicts) < self.config.max_detail_rows:
+            # Keep the cell list only while the RAM budget allows it; the full
+            # cell detail always lives in SQLite.
+            if self.cached_cells + len(cells) <= self.config.max_detail_cells:
+                self.cached_cells += len(cells)
+            else:
+                record.cells = []
+            self.row_verdicts[record.row] = record
+
+    def row_page(self, offset: int = 0, limit: int | None = None) -> list[RowRecord]:
+        """Read one page of row verdicts (with its cell detail) from the store."""
+        rows = list(self.store.iter_rows(offset=offset, limit=limit))
+        if not rows:
+            return []
+        cell_map: dict[int, list[CellRecord]] = {}
+        for raw in self.store.cells_between_rows(rows[0]["row"], rows[-1]["row"]):
+            cell_map.setdefault(raw["row"], []).append(CellRecord.from_row(raw))
+        records = []
+        for raw in rows:
+            record = RowRecord.from_row(raw)
+            record.cells = cell_map.get(raw["row"], [])
+            record.cell_count = len(record.cells)
+            records.append(record)
         return records
 
     def cell_counts(self) -> dict:
@@ -266,18 +307,21 @@ class PrivacyEngine:
             "rows_inspected": self.rows_inspected,
             "cells_inspected": self.cells_inspected,
             "empty_cells": self.empty_cells,
+            "extra_cells": self.extra_cells,
             "detector_calls": self.detector_calls,
             "rows_with_hits": self.rows_with_hits,
             "cell_hits": self.cell_hits,
             "pii_cells": self.pii_cells,
             "review_cells": self.review_cells,
             "ignored_cells": self.ignored_cells,
-            "detail_limit": self.config.max_detail_rows,
-            "detail_truncated_rows": self.detail_truncated_rows,
+            "detail_cache_rows": len(self.row_verdicts),
+            "detail_cache_limit": self.config.max_detail_rows,
+            "detail_cache_cells": self.cached_cells,
+            "detail_cache_cell_limit": self.config.max_detail_cells,
+            **self.store.stats(),
         }
 
     def finalise(self, stats: list[ColumnStats]) -> list[dict]:
-        by_type = {detector.type_key: detector for detector in self.detectors}
         findings = []
         for column in stats:
             affinity = max((d.column_affinity(column.name) for d in self.detectors), default=0.0)
@@ -286,7 +330,8 @@ class PrivacyEngine:
             for hit in column.hits.values():
                 ratio = hit.count / column.non_empty if column.non_empty else 0.0
                 confidence = hit.avg_confidence
-                type_affinity = by_type[hit.type_key].column_affinity(column.name) if hit.type_key in by_type else 0.0
+                detector = self.by_type.get(hit.type_key)
+                type_affinity = detector.column_affinity(column.name) if detector else 0.0
                 if type_affinity:
                     confidence += type_affinity * 0.2
                 if ratio >= 0.8:
@@ -307,10 +352,6 @@ class PrivacyEngine:
                     "column_name_hint": round(type_affinity, 3),
                     "hit_rows": hit_rows_for(column, hit.type_key, self.config.max_hit_rows),
                 }
-                # Dominance test: a privacy verdict needs the matching values to
-                # be the column's dominant content, and that content must be
-                # *confirmed* evidence (checksum/strict pattern), not just a
-                # superficially similar string.
                 lowered_name = column.name.lower()
                 identifier_named = any(token in lowered_name for token in IDENTIFIER_NAME_TOKENS)
                 looks_like_record_key = identifier_named and not type_affinity
@@ -321,10 +362,6 @@ class PrivacyEngine:
                     entry["decision"] = "개인정보"
                     types.append(entry)
                 else:
-                    # The column as a whole is not a privacy column, but the cells
-                    # that matched keep their own verdict ("검토") instead of being
-                    # dropped - a handful of genuine PII cells in an ordinary column
-                    # must still reach the row-level report.
                     entry["decision"] = "부분 매칭(검토)"
                     entry["rule_confidence"] = round(min(confidence, 1.0) * min(1.0, ratio + 0.2), 3)
                     entry["column_dominance"] = round(ratio, 4)

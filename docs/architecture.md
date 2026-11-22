@@ -71,16 +71,29 @@ The engine reports **where** personal data is, not just which column looked like
 * `analyse_row()` combines the Cells of one Row: direct identifiers, identifier pairs
   (이름+전화, 이름+생년월일, 이름+주소, ...), and multi-type combinations give the Row
   a verdict, basis string, confidence and risk level.
-* Verdicts are decided **during streaming** using the running support ratio, so the
-  counters (`rows_inspected`, `cells_inspected`, `pii_cells`, `rows_with_hits`) are
-  exact even when the detail ledger is capped at `max_detail_rows` (5,000 Rows).
-* Only Rows with `needs_review` go to the AI, capped at `max_ai_row_reviews` (100)
-  per file; rule-checked Cell count and AI judgement count are recorded separately.
+* Verdicts are computed in **two phases**: the scan writes raw Cell evidence to the
+  SQLite detail store, and after the file is fully streamed `finalise_verdicts()`
+  re-reads each hit with the *finished* column support ratio. The same Cell therefore
+  gets the same verdict no matter what order the Rows arrive in. Counters
+  (`rows_inspected`, `cells_inspected`, `pii_cells`, `rows_with_hits`) are exact
+  regardless of the RAM cache limits.
+* Row status is split: `확정` (confirmed types present), `검토 필요` (format-only
+  evidence), `없음` (nothing detected). `has_pii` stays true for both confirmed and
+  review Rows, so exports and the UI read `status`/`confirmed_pii`/`possible_pii`.
+* Column judgements go to the AI only for columns the rules did not settle
+  (`ai_column_reviews="selective"`, capped by `max_ai_column_reviews`); Row context
+  judgements only for Rows with `needs_review`, capped by `max_ai_row_reviews` and
+  sampled across the whole file rather than the first N Rows. Attempts, successes,
+  failures and skips are audited separately from the rule Cell counts.
 
 ## 5. Memory and throughput
 
 - 1,000 row batches, never a full file load, no pandas DataFrame.
-- Distinct values: HyperLogLog plus a bounded exact set (2,000 entries).
+- Detail is streamed into SQLite (`cell_detail` + `row_detail`, one record per Cell
+  hit); RAM keeps at most `max_detail_rows` Row verdicts and `max_detail_cells` Cell
+  records, so a 1,000 x 10,000 file peaks around 0.8 GB instead of ~1.9 GB.
+- Distinct values: HyperLogLog plus a bounded exact set sized from
+  `max_distinct_tracked / column_count` (HLL precision drops to 10 above 500 columns).
 - Sample values stored masked, at most 6 per column.
 - 130,000 rows x 14 columns finishes in roughly 20 seconds (rules only,
   Apple Silicon, measured by tests/performance/test_large_file.py).

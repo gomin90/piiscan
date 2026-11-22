@@ -49,6 +49,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cpu-only", action="store_true", help="Metal/GPU 없이 CPU로 AI 추론")
     parser.add_argument("--gpu-layers", dest="gpu_layers", type=int, default=None,
                         help="GPU로 offload할 layer 수 (0 = CPU). 기본: GPU backend 설치 시 999")
+    parser.add_argument("--detail-store", default="", help="Row/Cell 상세 SQLite 저장 경로 (기본: 임시 파일)")
+    parser.add_argument("--max-detail-rows", type=int, default=5000,
+                        help="RAM에 유지할 Row 판정 수 (전체 상세는 SQLite에 저장)")
+    parser.add_argument("--max-detail-cells", type=int, default=50000,
+                        help="RAM Cell 캐시 한도 (전체 Cell 상세는 SQLite)")
+    parser.add_argument("--max-ai-row-reviews", type=int, default=100, help="AI Row 문맥 판단 최대")
+    parser.add_argument("--max-ai-column-reviews", type=int, default=200, help="AI 컬럼 판단 최대 횟수")
+    parser.add_argument("--ai-column-reviews", choices=["selective", "all", "none"], default="selective",
+                        help="AI 컬럼 판단 범위: 규칙으로 확정된 컬럼 skipping(selective) / 전부(all) / 없음(none)")
     parser.add_argument("--debug", action="store_true", help="진단 로그 출력")
     parser.add_argument("--json", action="store_true", help="JSON 요약 stdout")
     parser.add_argument("--report-json", help="실행/진단 결과를 JSON 파일로 저장 (원문 개인정보 없음)")
@@ -78,6 +87,12 @@ def run_cli(args) -> int:
     config.jev_model = args.jev_model
     config.gpu_layers = args.gpu_layers
     config.debug = args.debug
+    config.detail_store_path = args.detail_store
+    config.max_detail_rows = args.max_detail_rows
+    config.max_detail_cells = args.max_detail_cells
+    config.max_ai_row_reviews = args.max_ai_row_reviews
+    config.max_ai_column_reviews = args.max_ai_column_reviews
+    config.ai_column_reviews = args.ai_column_reviews
 
     logger = get_logger()
     diagnostics = Diagnostics(enabled=args.debug)
@@ -117,12 +132,23 @@ def run_cli(args) -> int:
             result.elapsed_seconds,
         )
         logger.info(
-            "Row 단위: Cell hits %d (빈 Cell %d, 규칙 호출 %d), AI 판단 %d회",
+            "Row 단위: Cell hits %d (빈 Cell %d, 규칙 호출 %d), 상세 저장 Row %d / Cell %d (%s), AI 판단 %d회",
             counts.get("cell_hits", 0),
             counts.get("empty_cells", 0),
             counts.get("detector_calls", 0),
+            counts.get("detail_rows_stored", 0),
+            counts.get("detail_cells_stored", 0),
+            counts.get("detail_store", ""),
             result.ai_summary.get("decisions", 0),
         )
+        audit = result.ai_audit
+        if audit:
+            logger.info(
+                "AI 감사: 컬럼 판단 %d 시도(성공 %d, 실패 %d, 생략 %d) / Row 판단 %d 시도(성공 %d, 실패 %d, 생략 %d)",
+                audit.get("attempts", 0), audit.get("success", 0), audit.get("failed", 0), audit.get("skipped", 0),
+                audit.get("row", {}).get("attempts", 0), audit.get("row", {}).get("success", 0),
+                audit.get("row", {}).get("failed", 0), audit.get("row", {}).get("skipped", 0),
+            )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = Path(args.output_dir)
@@ -132,6 +158,10 @@ def run_cli(args) -> int:
     hits_path = write_hit_rows(results, output_dir / f"privacy_hits_{timestamp}.csv")
     rows_path = write_row_records(results, output_dir / f"privacy_rows_{timestamp}.csv")
     logger.info("결과: %s / %s / %s / %s", csv_path, txt_path, hits_path, rows_path)
+    for result in results:
+        store = getattr(result, "detail_store", None)
+        if store is not None:
+            store.close()
 
     report = {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

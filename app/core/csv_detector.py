@@ -86,46 +86,52 @@ def _sniff_encoding(raw: bytes) -> tuple[str, str]:
     return "latin-1", head.decode("latin-1", errors="replace")
 
 
-def _split_lines(text: str) -> list[str]:
-    return [line for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+def logical_rows(text: str, delimiter: str, limit: int = 400) -> list[list[str]]:
+    """Parse *logical* CSV records, honouring quoted fields that span lines.
+
+    A physical line is not a record: `a,"b\nc",d` is one record on three lines.
+    Everything downstream (delimiter choice, header detection, column count) uses
+    these records so a quoted comma, tab, semicolon or newline cannot split a row.
+    """
+    rows: list[list[str]] = []
+    for row in csv.reader(io.StringIO(text, newline=""), delimiter=delimiter):
+        if row:
+            rows.append(row)
+        if len(rows) >= limit:
+            break
+    return rows
 
 
-def detect_delimiter(lines: list[str]) -> str:
-    """Choose the delimiter that produces the most consistent column count."""
+def detect_delimiter(text: str) -> str:
+    """Choose the delimiter that produces the most consistent record structure."""
     scored: dict[str, float] = {}
-    candidates = list(SUPPORTED_DELIMITERS)
-    for delim in candidates:
-        counts = []
-        for line in lines[:40]:
-            if not line.strip():
-                continue
-            counts.append(line.count(delim))
-        if not counts:
+    for delim in SUPPORTED_DELIMITERS:
+        rows = logical_rows(text, delim, limit=100)
+        if len(rows) < 2:
             continue
-        nonzero = [c for c in counts if c > 0]
-        if not nonzero:
+        widths = [len(row) for row in rows]
+        if max(widths) <= 1:
             continue
-        mode = max(set(nonzero), key=nonzero.count)
-        consistency = nonzero.count(mode) / len(nonzero)
-        scored[delim] = consistency * (mode + 1)
+        mode = max(set(widths), key=widths.count)
+        consistency = widths.count(mode) / len(widths)
+        if mode <= 1 or consistency < 0.3:
+            continue
+        # Prefer the delimiter that keeps quoted content intact: a wrong
+        # delimiter breaks quoted fields into extra columns.
+        quoted_rows = sum(1 for row in rows if any('"' in cell for cell in row))
+        scored[delim] = consistency * mode + (0.5 if quoted_rows else 0.0)
     if not scored:
         return ","
-    best = max(scored.items(), key=lambda item: item[1])
-    # A comma inside quoted text still leaves tabs/pipes as the real delimiter.
-    if best[0] == "," and any('"' in line for line in lines[:20]):
-        for delim in ("\t", "|", ";"):
-            if any(delim in line for line in lines[:20]) and scored.get(delim, 0) >= best[1] * 0.5:
-                return delim
-    return best[0]
+    return max(scored.items(), key=lambda item: item[1])[0]
 
 
-def _looks_like_header(lines: list[str], delimiter: str) -> bool:
-    if len(lines) < 2:
+def _looks_like_header(rows: list[list[str]], delimiter: str) -> bool:
+    if len(rows) < 2:
         return True
-    first = [c.strip() for c in next(csv.reader([lines[0]], delimiter=delimiter))]
+    first = [c.strip() for c in rows[0]]
     if not first or any(not c for c in first):
         return False
-    second = [c.strip() for c in next(csv.reader([lines[1]], delimiter=delimiter))]
+    second = [c.strip() for c in rows[1]]
     if len(first) != len(second):
         return True
     # Header rows are short, letter-heavy and rarely numeric.
@@ -153,18 +159,16 @@ def detect_format(path: str | Path, preview_lines: int = 20) -> FormatProfile:
     if BINARY_HINT_RE.search(raw[:4096]) and text.count("\n") < 2:
         return FormatProfile(str(p), encoding, ",", False, 0, [], 0.0, ["바이너리 파일로 판단됨"], binary_like=True)
 
-    lines = _split_lines(text)
-    content_lines = [line for line in lines if line.strip()]
-    if not content_lines:
+    if not text.strip():
         return FormatProfile(str(p), encoding, ",", False, 0, [], 0.0, ["빈 파일"], binary_like=True)
 
-    delimiter = detect_delimiter(content_lines)
-    rows = list(csv.reader(content_lines[:200], delimiter=delimiter))
+    delimiter = detect_delimiter(text)
+    rows = logical_rows(text, delimiter, limit=200)
     if not rows:
         return FormatProfile(str(p), encoding, delimiter, False, 0, [], 0.0, ["행 parsing 실패"], binary_like=True)
 
-    has_header = _looks_like_header(content_lines, delimiter)
-    header = rows[0] if has_header else rows[0]
+    has_header = _looks_like_header(rows, delimiter)
+    header = rows[0]
     notes: list[str] = []
     if not has_header:
         notes.append("헤더가 없는 파일로 판단됨")

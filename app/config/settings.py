@@ -31,8 +31,19 @@ class AnalysisConfig:
     # many rows (cell counts and row counts are always exact; only the detail list
     # is capped, and the truncation is reported in the result).
     max_detail_rows: int = 5000
+    # Memory cache: how many cell records the in-memory row cache may hold in
+    # total. Detail is written to SQLite unconditionally, so this only bounds RAM:
+    # once the budget is reached, cached rows keep their verdict but not their
+    # individual cell list (the GUI and exports read the cells from the store).
+    max_detail_cells: int = 50_000
+    # Where the detail database lives; empty means a temporary file per analysis.
+    detail_store_path: str = ""
     # AI is never called per cell/row: only ambiguous rows, capped like this.
     max_ai_row_reviews: int = 100
+    # AI column judgement is selective: columns already settled by the rule engine
+    # are skipped unless ai_column_reviews="all". Counts are audited per file.
+    max_ai_column_reviews: int = 200
+    ai_column_reviews: str = "selective"  # selective | all | none
     threads: int = DEFAULT_THREADS
     use_ai: bool = True
     # AI 판정 engine: "jev" (Jev-Style Decision Model), "llm" (generative local GGUF), "auto"

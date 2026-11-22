@@ -113,6 +113,32 @@ def test_result_detail_shows_row_level_hits(app, gui_csv, tmp_path, monkeypatch)
     assert window.result_window.hit_table.item(0, 4).text()  # masked value column
 
 
+def test_result_window_paginates_row_detail(app, tmp_path, monkeypatch):
+    """More rows than the memory cache must still be browsable page by page."""
+    csv_path = tmp_path / "many.csv"
+    csv_path.write_text(
+        "IDX,EMAIL\n" + "\n".join(f"{i},user{i}@example.com" for i in range(1, 601)),
+        encoding="utf-8",
+    )
+    window = MainWindow()
+    window.selector.files = [csv_path]
+    monkeypatch.chdir(tmp_path)
+    window.run_analysis()
+
+    result = window.result_window
+    result.show_rows(result._file_results, page=0, page_size=100)
+    assert result.row_table.rowCount() == 100
+    assert "600건 저장됨" in result.row_context.text()
+    assert result.next_page.isEnabled() and not result.prev_page.isEnabled()
+    result._change_page(1)
+    assert result.row_table.item(0, 0).text() == "101"
+    assert result.hit_table.rowCount() > 0
+    result._change_page(4)
+    assert result.row_table.rowCount() == 100
+    assert result.row_table.item(0, 0).text() == "501"
+    assert not result.next_page.isEnabled()
+
+
 def test_debug_off_leaves_diagnostics_empty(app, gui_csv, tmp_path, monkeypatch):
     window = MainWindow()
     window.config.debug = False

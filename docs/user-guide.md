@@ -61,9 +61,12 @@ CLI equivalents are `--mode`, `--table`, `--schema`, `--db`, `--gpu-layers`.
 존재 여부, 근거, 위험도)으로 기록된다. 컬럼이 "개인정보 컬럼"으로 분류되지 않았더라도
 Cell evidence는 삭제되지 않는다.
 
-* 결과 탭의 **Row 단위 판정** table: 행번호 / 개인정보 존재 / 유형 / 발생 컬럼 / 위험도 /
-  검토 필요.
+* 결과 탭의 **Row 단위 판정** table: 행번호 / 개인정보 상태(확정·검토 필요·없음) /
+  확정 개인정보 / 검토 필요 개인정보 / 발생 컬럼 / 위험도 / AI Row 판정.
 * **Cell 상세** table: 행번호 / 컬럼 / 컬럼 인덱스 / 유형 / 판정 / 탐지값(마스킹).
+* Row 상세는 SQLite detail store에 전량 저장되며 GUI는 페이지(기본 200 Row)로 조회한다.
+  `--detail-store <path>`로 저장 파일을 지정할 수 있고, 저장 건수는 GUI progress pane와
+  TXT 보고서("상세 저장: Row N / Cell M")에서 확인할 수 있다.
 * 파일 export: `results/privacy_rows_<timestamp>.csv` (Row 판정, 한 Row 한 line)와
   `results/privacy_hits_<timestamp>.csv` (Cell hit, 한 Cell 한 line).
 * Row 문맥(예: 이름 + 전화번호 + 주소가 같은 Row)은 판정 근거(`판정 근거`)에 recorded.

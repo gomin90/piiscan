@@ -179,14 +179,18 @@ def test_bulk_rows_are_counted() -> None:
     assert counts["cells_inspected"] == 150_000
     assert counts["rows_with_hits"] == 50_000
     assert counts["pii_cells"] >= 100_000
-    assert counts["detail_truncated_rows"] == 45_000  # detail rows capped at max_detail_rows
-    assert counts["detail_limit"] == 5000
-    assert counts["detail_truncated_rows"] == 45_000
-    assert len(result.row_records) == 5000
+    # Every hit row is stored on disk; only the memory cache is capped.
+    assert counts["detail_rows_stored"] == 50_000
+    assert counts["detail_cells_stored"] == counts["cell_hits"]
+    assert counts["detail_cache_limit"] == 5000
+    assert counts["detail_cache_rows"] == 5000
     assert elapsed < 60.0
 
+    # The export is complete, not truncated: one line per stored row.
     records = collect_row_records([result])
-    assert len(records) == 5000
+    assert len(records) == 50_000
+    cells = collect_hit_cells([result])
+    assert len(cells) == counts["cell_hits"]
 
 
 # --------------------------------------------------------------------------

@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QGridLayout,
+    QHBoxLayout,
     QLabel,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -77,14 +79,25 @@ class ResultWindow(QWidget):
         layout.addWidget(self.hit_table)
 
         self.row_table = QTableWidget()
-        self.row_table.setColumnCount(6)
+        self.row_table.setColumnCount(7)
         self.row_table.setHorizontalHeaderLabels(
-            ["행번호", "개인정보 존재", "유형", "발생 컬럼", "Row 위험도", "검토"]
+            ["행번호", "개인정보 상태", "확정 개인정보", "검토 필요", "발생 컬럼",
+             "Row 위험도", "AI Row 판정"]
         )
-        for index, width in enumerate([70, 90, 140, 160, 90, 70]):
+        for index, width in enumerate([70, 90, 130, 130, 150, 90, 110]):
             self.row_table.setColumnWidth(index, width)
-        layout.addWidget(QLabel("Row 단위 판정"))
+        layout.addWidget(QLabel("Row 단위 판정 (확정 개인정보와 검토 필요 구분)"))
         layout.addWidget(self.row_table)
+        self.row_context = QLabel("Row 상세 없음")
+        layout.addWidget(self.row_context)
+        page_row = QHBoxLayout()
+        self.prev_page = QPushButton("이전 페이지")
+        self.next_page = QPushButton("다음 페이지")
+        self.prev_page.clicked.connect(lambda: self._change_page(-1))
+        self.next_page.clicked.connect(lambda: self._change_page(1))
+        page_row.addWidget(self.prev_page)
+        page_row.addWidget(self.next_page)
+        layout.addLayout(page_row)
 
     def show_hits(self, result) -> None:
         rows = result.hit_rows if hasattr(result, "hit_rows") else []
@@ -97,25 +110,72 @@ class ResultWindow(QWidget):
             self.hit_table.setItem(index, 4, QTableWidgetItem(getattr(result, "verdict", "개인정보")))
             self.hit_table.setItem(index, 5, QTableWidgetItem(hit["value"]))
 
-    def show_rows(self, file_results: list) -> None:
-        records = collect_row_records(file_results)
-        cells = collect_hit_cells(file_results)
+    def show_rows(self, file_results: list, page: int = 0, page_size: int = 200) -> None:
+        """Render one page of row verdicts (and its cell detail) from the detail store."""
+        self._file_results = file_results
+        self._page_size = page_size
+        self._page = page
+        total = 0
+        for result in file_results:
+            store = getattr(result, "detail_store", None)
+            total += store.row_count if store is not None else len(getattr(result, "row_records", []))
+        offset = page * page_size
+        records = list(self._page_records(file_results, offset, page_size))
         self.row_table.setRowCount(len(records))
         for index, record in enumerate(records):
-            self.row_table.setItem(index, 0, QTableWidgetItem(str(record["row_number"])))
-            self.row_table.setItem(index, 1, QTableWidgetItem(record["has_pii"]))
-            self.row_table.setItem(index, 2, QTableWidgetItem(record["pii_types"] or record["review_types"]))
-            self.row_table.setItem(index, 3, QTableWidgetItem(record["columns"]))
-            self.row_table.setItem(index, 4, QTableWidgetItem(record["risk_level"]))
-            self.row_table.setItem(index, 5, QTableWidgetItem(record["needs_review"]))
+            self.row_table.setItem(index, 0, QTableWidgetItem(str(record["row"])))
+            self.row_table.setItem(index, 1, QTableWidgetItem(record["status"]))
+            self.row_table.setItem(index, 2, QTableWidgetItem(", ".join(record["confirmed_pii"])))
+            self.row_table.setItem(index, 3, QTableWidgetItem(", ".join(record["possible_pii"])))
+            self.row_table.setItem(index, 4, QTableWidgetItem(", ".join(record["column_names"])))
+            self.row_table.setItem(index, 5, QTableWidgetItem(record["risk_level"]))
+            ai = record.get("ai_review") or {}
+            self.row_table.setItem(index, 6, QTableWidgetItem(ai.get("personality", "-") or "-"))
+
+        cells = []
+        for record in records:
+            store = record.get("_store")
+            if store is not None:
+                cells.extend(store.cells_between_rows(record["row"], record["row"]))
         self.hit_table.setRowCount(len(cells))
         for index, cell in enumerate(cells):
-            self.hit_table.setItem(index, 0, QTableWidgetItem(str(cell["row_number"])))
+            self.hit_table.setItem(index, 0, QTableWidgetItem(str(cell["row"])))
             self.hit_table.setItem(index, 1, QTableWidgetItem(cell["column"]))
             self.hit_table.setItem(index, 2, QTableWidgetItem(str(cell["column_index"])))
-            self.hit_table.setItem(index, 3, QTableWidgetItem(cell["privacy_type"]))
-            self.hit_table.setItem(index, 4, QTableWidgetItem(cell["verdict"]))
+            self.hit_table.setItem(index, 3, QTableWidgetItem(cell["display_name"]))
+            self.hit_table.setItem(index, 4, QTableWidgetItem(cell["decision"]))
             self.hit_table.setItem(index, 5, QTableWidgetItem(cell["masked_value"]))
+
+        last_page = max(0, (total - 1) // page_size)
+        self.row_context.setText(
+            f"Row 상세 {total:,}건 저장됨 (SQLite) - 페이지 {page + 1}/{last_page + 1}, "
+            f"이 페이지 {len(records)}건 / Cell 상세 {len(cells)}건"
+        )
+        self.prev_page.setEnabled(page > 0)
+        self.next_page.setEnabled(page < last_page)
+
+    def _page_records(self, file_results: list, offset: int, limit: int):
+        remaining = offset
+        for result in file_results:
+            store = getattr(result, "detail_store", None)
+            count = store.row_count if store is not None else len(getattr(result, "row_records", []))
+            if remaining >= count:
+                remaining -= count
+                continue
+            take = min(limit, count - remaining)
+            source = store.iter_rows(remaining, take) if store is not None else [
+                record.as_dict() for record in result.row_records[remaining:remaining + take]
+            ]
+            for record in source:
+                record["_store"] = store
+                yield record
+            limit -= take
+            remaining = 0
+            if limit <= 0:
+                break
+
+    def _change_page(self, delta: int) -> None:
+        self.show_rows(self._file_results, self._page + delta, self._page_size)
 
     def show_results(self, results: list) -> None:
         rows = sorted(results, key=lambda r: (RISK_ORDER.get(r.risk_level, 9), -r.hits))

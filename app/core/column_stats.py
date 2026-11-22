@@ -44,7 +44,9 @@ class ColumnStats:
     total_len: int = 0
     length_buckets: Counter = field(default_factory=Counter)
     tags: Counter = field(default_factory=Counter)
-    distinct: BoundedSet = field(default_factory=lambda: BoundedSet(limit=2000))
+    # Exact distinct tracking is per-column but sized from a file-wide memory
+    # budget, so a 10,000-column file does not keep 10,000 x 2000 strings.
+    distinct: BoundedSet = field(default_factory=lambda: BoundedSet(limit=50, p=10))
     hits: dict[str, Hit] = field(default_factory=dict)
     samples: list[str] = field(default_factory=list)
     # Per-type list of the rows that actually matched, so the report can show

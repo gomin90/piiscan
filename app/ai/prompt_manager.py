@@ -50,22 +50,51 @@ def build_prompt(context: dict) -> str:
     return SYSTEM_PROMPT + "\n\n분석 대상:\n" + json.dumps(context, ensure_ascii=False, indent=2)
 
 
+def _ranked_cells(cells: list[dict], limit: int = 12) -> list[dict]:
+    """Confirmed evidence first, then one cell per distinct type, then the rest.
+
+    Taking the first N cells of a row would let column order decide what the model
+    sees; ranking by verdict and confidence keeps the settled evidence and the
+    ambiguous evidence both visible, and keeps distinct types represented.
+    """
+    confirmed = [c for c in cells if c.get("decision") == "개인정보"]
+    review = [c for c in cells if c.get("decision") == "검토 필요"]
+    confirmed.sort(key=lambda c: (-c.get("confidence", 0.0), c.get("column_index", 0)))
+    review.sort(key=lambda c: (-c.get("confidence", 0.0), c.get("column_index", 0)))
+
+    seen: set[str] = set()
+    diverse: list[dict] = []
+    for cell in confirmed + review:
+        key = cell.get("type_key") or cell.get("display_name") or ""
+        if key not in seen:
+            seen.add(key)
+            diverse.append(cell)
+    ordered = diverse + [c for c in confirmed + review if c not in diverse]
+    return ordered[:limit]
+
+
 def row_context(record: dict) -> dict:
     """Row-level LLM context: masked cell values and rule evidence only."""
     return {
         "row": record.get("row"),
         "schema": record.get("schema", ""),
         "table": record.get("table", ""),
+        "risk_level": record.get("risk_level", ""),
+        "confirmed_types": record.get("confirmed_types", []),
+        "possible_types": record.get("possible_types", []),
+        "cells_checked": record.get("cells_checked", 0),
         "cells": [
             {
                 "column": cell.get("column"),
                 "column_index": cell.get("column_index"),
-                "type": cell.get("type_key") or cell.get("display_name"),
+                "type": cell.get("type_key") or cell.get("type") or cell.get("display_name"),
                 "masked_value": mask_value(str(cell.get("masked_value") or cell.get("value") or "")),
                 "verdict": cell.get("decision", ""),
                 "confidence": cell.get("confidence", 0.0),
+                "column_support": cell.get("column_support", 0.0),
+                "name_hint": cell.get("name_hint", 0.0),
             }
-            for cell in record.get("cells", [])[:8]
+            for cell in _ranked_cells(record.get("cells", []) or [])
         ],
         "rule_basis": record.get("basis", ""),
         "needs_review": record.get("needs_review", False),

@@ -4,6 +4,8 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+from app.utils.csv_safety import formula_safe
+
 HEADERS = [
     "분석일시", "파일명", "원본DB", "스키마", "테이블명", "분석방식", "분석행수",
     "컬럼명", "컬럼 인덱스", "개인정보유형", "판정", "탐지건수", "탐지비율", "탐지행(예, 마스킹)",
@@ -21,31 +23,31 @@ def write_csv(results: list, output: str | Path) -> str:
         for result in results:
             row = result.as_dict() if hasattr(result, "as_dict") else result
             writer.writerow([
-                row["analysed_at"],
-                row["file"],
-                row["db_type"],
-                row["schema"],
-                row["table"],
-                row["mode"],
+                formula_safe(row["analysed_at"]),
+                formula_safe(row["file"]),
+                formula_safe(row["db_type"]),
+                formula_safe(row["schema"]),
+                formula_safe(row["table"]),
+                formula_safe(row["mode"]),
                 row["rows_analysed"],
-                row["column"],
+                formula_safe(row["column"]),
                 row.get("column_index", 0),
-                row["display_name"],
-                row.get("verdict", "개인정보"),
+                formula_safe(row["display_name"]),
+                formula_safe(row.get("verdict", "개인정보")),
                 row["hits"],
                 row["ratio"],
-                row.get("hit_rows_text", ""),
-                row["protection_columns"],
-                row["mask_status"],
-                row["hash_status"],
-                row.get("rule_decision", ""),
-                row.get("ai_decision", ""),
-                row.get("agreement", "AI 미사용"),
-                row.get("final_decision", row["privacy_type"]),
+                formula_safe(row.get("hit_rows_text", "")),
+                formula_safe(row["protection_columns"]),
+                formula_safe(row["mask_status"]),
+                formula_safe(row["hash_status"]),
+                formula_safe(row.get("rule_decision", "")),
+                formula_safe(row.get("ai_decision", "")),
+                formula_safe(row.get("agreement", "AI 미사용")),
+                formula_safe(row.get("final_decision", row["privacy_type"])),
                 row["rule_confidence"],
                 row["ai_confidence"],
-                row["risk_level"],
-                row["rationale"],
+                formula_safe(row["risk_level"]),
+                formula_safe(row["rationale"]),
                 "Y" if row["requires_review"] else "N",
             ])
     return str(output)
