@@ -404,7 +404,153 @@ Detail completeness is unchanged; only the in-memory cache shrank.
 * GUI headless pagination test passed; offscreen screenshot shows the Row/Cell detail tables and
   "Row 상세 N건 저장됨 (SQLite) - 페이지 x/y" label.
 
-## 10. 미해결 · 운영 제약
+## 10. v0.6.0 안정화 (v0.5.0 코드 리뷰 후속)
+
+측정 host: macOS Apple Silicon (18 cores, 64 GB RAM, Metal backend). 모든 수치는 이
+host에서 실제 실행한 결과이며, Windows / NVIDIA / RTX 5060 실측은 **미검증**으로 남긴다.
+
+### 10.1 Peak RSS 측정 방식
+
+v0.5.0까지 `tools/perf_matrix.py`는 분석이 끝난 시점의 `psutil.Process().memory_info().rss`
+를 "peak"로 보고했다 — 현재값이지 최대값이 아니다. v0.6.0부터:
+
+* `PeakRSS`: background thread로 **25 ms 간격** RSS를 샘플링하고 window 내 최대값을 기록 (`peak_rss_mb`, `rss_samples`).
+* `ru_maxrss`(process lifetime high-water mark)는 `lifetime_max_rss_mb`로 별개로 보고.
+* 단위: MiB. 측정 방식 문자열이 JSON 결과에 함께 저장된다 (`measurement` 키).
+
+재현: `tests/qa/test_stabilization.py::test_peak_rss_sampler_records_the_maximum_not_the_last_value`
+(60 MB ballast를 중간에 held → peak 기록, 해제 후 current < peak).
+
+§9.2/9.3의 "Peak RSS" 수치는 end-of-run RSS 기준이므로 §10.4/10.5의 sampled peak로 대체한다.
+
+### 10.2 문제별 수정과 재현 테스트
+
+| # | 문제 | 수정 (코드) | 재현 테스트 (실제 실행) |
+|---|---|---|---|
+| P1 | `review_rows(limit=0)`에서 `total // limit` → ZeroDivisionError | [detail_store.py](../app/core/detail_store.py) `review_rows`: `limit <= 0` → `[]` (Row AI off), candidates/selected/unreviewed 분리 기록 | `test_row_review_limit_never_divides_by_zero` (limit 0, 1, 100, 1000, 10,000) |
+| P1 | 여러 `--file` + 공통 `--detail-store`에서 Row 번호 충돌 | `analysis_id = "<stem>-<sha1(path)[:10]"`로 모든 table/query scope, `UNIQUE(analysis_id, row)`; 기본값은 파일별 임시 DB | `test_three_files_same_row_numbers_share_one_store`, `test_shared_store_export_contains_only_own_file` |
+| P1 | Export가 전체 상세를 list로 적재 | [hit_exporter.py](../app/export/hit_exporter.py) `iter_hit_cells()` / `iter_row_records()` generator, `csv.writer` 한 건씩, `write_*().rows_written` 카운트. `collect_*`는 호환용 | `test_large_export_is_streamed_and_exact` (1,000,000 / 2,000,000 Cell), `test_export_streams_without_loadinthe_store` |
+| P1 | Header와 data column 불 일치 (record key 순서 의존) | `CELL_FIELDS` / `ROW_FIELDS` (key, header) 쌍으로 정의, `_write`는 header 순서대로만 출력 | `tests/qa/test_export_alignment.py::test_export_columns_line_up_with_their_headers` |
+| P1 | GUI가 Row 페이지 200건의 모든 Cell을 한 번에 렌더링 | [result_window.py](../app/ui/result_window.py) Row click → Cell 상세, `gui_cell_page_size`(default 200) 상한, Cell page buttons | `test_gui_cell_detail_is_capped_and_paged` (1,000컬럼 dense Row, page 300 → 300/300/300/100) |
+| P2 | AI 후보가 컬럼 순서 앞쪽부터, weak type 무시 | `ai_column_candidates()` priority = uncertainty + 0.35·conflicts + 0.25·weak + 0.2·sensitivity + 0.1·name_affinity + 0.001·hits; `select_column_candidates()` top ¾ + 균등 spread(맨 마지막 후보 포함) | `test_ai_candidates_include_tail_and_weak_columns`, `test_conflicting_types_make_a_column_an_ai_candidate`, `test_ai_candidate_selection_is_not_column_order_dependent` |
+| P2 | Row AI 표본 floor-stride bias | uniform deterministic sampling `i*(total-1)//(limit-1)` → first/middle/last 필수 포함, 재현 가능 | `test_row_ai_sample_represents_head_middle_tail` (total 101/150/201/299/1000), `test_row_sample_is_deterministic` |
+| P2 | csv.reader `next()` 오류 미 격리, oversized 필드 silent | [csv_loader.py](../app/core/csv_loader.py) `max_field_chars`(default 10,000,000), header/row iteration 각각 try, `rows_unparsed`/`oversized_fields`/`parse_errors` 집계; [csv_detector.py](../app/core/csv_detector.py) field_limit 인자 + `finally`로 전역 limit 복구 | `test_oversized_field_is_reported_not_silent`, `test_header_parse_error_is_isolated`, `test_offscreen_field_limit_is_restored` |
+| P2 | 긴 JSON/Base64/log 필드 내부 개인정보 미검사 | [app/detectors/embedded.py](../app/detectors/embedded.py) interior scanners (주민번호/전화/카드/이메일/여권) + `long_text` profile tag, `Match.fragment`만 저장(원문 cell 아님) | `test_large_json_and_base64_fields_still_scanned` |
+| P2 | `extra_cells`/`extra_columns` semantics | `CsvLoader.header_length` 기준으로 per-row extra 누적, distinct extra columns; parse diagnostics in `FileResult` | `test_extra_cells_counted_per_row` (3건) |
+| P2 | JSON Row 수 = memory cache | CLI/JSON은 `detail_rows_stored`(SQLite), `details_complete` / `details_truncated` / `detail_rows_in_json` 명시적 flags | `test_json_reports_detail_completeness` |
+| P2 | formula_safe 첫 문자만 검사 | [csv_safety.py](../app/utils/csv_safety.py) `looks_like_formula()` leading space/tab/CR/LF strip, 원본 trim 하지 않음 | `test_formula_injection_is_neutralised` (`" =1+1"`, `"\t@x"`, `" -2"`, `" +1"`) |
+| P2 | 임시 DB 수명주기 | `DetailStore.cleanup()` 임시 store만 삭제(WAL/SHM 포함), 명시적 `--detail-store` 보존, GUI `closeEvent` → `cleanup_stores()`, 보고서에 `detail_store_cleanup` | `test_temporary_store_is_cleaned_up`, `test_explicit_store_survives_cleanup`, `test_cli_closes_and_reports_temp_store` |
+
+### 10.3 다중 파일 실측 (CLI)
+
+`--file a1.csv --file a2.csv --file a3.csv --detail-store shared.sqlite --no-ai`
+(각 4 Row, identical Row 번호):
+
+```
+a1.csv -> Row 4 / Cell 16 ... 상세 저장 Row 4 / Cell 4
+a2.csv -> ... Row 4 / Cell 4
+a3.csv -> ... Row 4 / Cell 4
+결과: ... (Export 12 Cell / 12 Row)
+상세 저장소 유지 (--detail-store): shared.sqlite
+```
+
+저장 12 Row = Export 12 Row, 파일별 섞임 없음 (export에서 각 파일명 4건).
+
+### 10.4 Scenario matrix — v0.5.0 (end-of-run RSS) vs v0.6.0 (sampled peak)
+
+`tools/perf_matrix.py --ai none`, same fixture, separate runs (macOS):
+
+| # | Shape | rule s (before → after) | total s (before → after) | RSS before (end) | sampled peak after | lifetime max | Store MB (before → after) | Cell P/R/F1 | Row P/R/F1 |
+|---|---|---|---|---|---|---|---|---|---|
+| A | 100 x 100 | 0.05 → 0.05 | 0.98 → 1.03 | 41.5 MB | 39.8 MB | 40.2 MB | 0.0 → 0.0 | 1.00/1.00/1.00 | 1.00/1.00/1.00 |
+| B | 100 x 1,000 | 0.47 → 0.49 | 1.52 → 1.49 | 79.1 MB | 75.9 MB | 77.6 MB | 3.5 → 4.4 | 1.00/1.00/1.00 | 1.00/1.00/1.00 |
+| C | 100 x 10,000 | 4.78 → 4.70 | 7.43 → 7.20 | 268.7 MB | **319.8 MB** | 326.5 MB | 35.7 → 44.3 | 1.00/1.00/1.00 | 1.00/1.00/1.00 |
+| D | 1,000 x 1,000 | 4.67 → 4.75 | 6.54 → 6.64 | 256.7 MB | 236.9 MB | 326.5 MB | 36.3 → 44.9 | 1.00/1.00/1.00 | 1.00/1.00/1.00 |
+| E | 1,000 x 10,000 | 46.16 → 46.75 | 57.60 → 58.38 | 1,193.6 MB | **1,333.8 MB** | 1,334.2 MB | 360.0 → 447.8 | 1.00/1.00/1.00 | 1.00/1.00/1.00 |
+| F | 10,000 x 100 | 4.36 → 4.42 | 6.16 → 6.27 | 569.5 MB | 513.4 MB | 1,334.2 MB | 35.8 → 46.2 | 1.00/1.00/1.00 | 1.00/1.00/1.00 |
+
+속도는 ±2% within run-to-run noise; SQLite store 크기는 `analysis_id` column과
+`column_support`/`cells_checked` column 추가로 20-25% 증가했다. Sampled peak가 end-of-run
+RSS보다 C·E에서 19-20% 높게 나왔다 — v0.5.0 문서의 Peak RSS는 underestimate였다.
+
+Real Jev-Style 0.8B (Metal) AI matrix (`--ai real`):
+
+| # | Shape | AI column attempts / skipped | AI row attempts / skipped | AI s | total s | sampled peak RSS |
+|---|---|---|---|---|---|---|
+| A | 100 x 100 | 20 / 80 | 100 / 0 | 14.49 | 17.91 | 267.2 MB |
+| B | 100 x 1,000 | 200 / 800 | 100 / 0 | 54.72 | 58.69 | 341.2 MB |
+| C | 100 x 10,000 | 200 / 9,800 | 100 / 0 | 46.09 | 56.21 | 510.0 MB |
+| D | 1,000 x 1,000 | 200 / 800 | 100 / 900 | 38.87 | 47.55 | 494.3 MB |
+| E | 1,000 x 10,000 | 200 / 9,800 | 100 / 900 | 43.90 | 103.13 | 1,620.3 MB |
+| F | 10,000 x 100 | 20 / 80 | 100 / 9,900 | 9.53 | 18.12 | 1,115.2 MB |
+
+Cell/Row P/R/F1 1.00 유지 (AI selection이 recall을 줄이지 않는다).
+
+### 10.5 상세 메모리 cap 실측 (scenario E, fresh process per cap)
+
+`tools/memory_profile.py --caps 2000000,500000,50000,5000`
+
+| max_detail_cells | Sampled peak RSS | Cached cells | Stored cells | Store |
+|---|---|---|---|---|
+| 2,000,000 (unbounded) | 2,286.6 MB | 2,000,000 | 2,000,000 | 447.8 MB |
+| 500,000 | 1,555.0 MB | 500,000 | 2,000,000 | 447.8 MB |
+| 50,000 (default) | 1,333.8 MB | 50,000 | 2,000,000 | 447.8 MB |
+| 5,000 | 1,333.8 MB | 4,000 | 2,000,000 | 447.8 MB |
+
+50,000 이하에서는 peak가 동일(ColumnStats/HLL과 SQLite가 dominant) → 기본값 50,000이
+memory와 completeness 사이의 실제 knee.
+
+### 10.6 Wide CSV 컬럼 수별 memory
+
+`tools/memory_profile.py --columns 100,1000,10000 --rows 200` (RSS sampled 25 ms,
+ColumnStats + HLL tracemalloc):
+
+| columns | cells | peak RSS | ColumnStats traced | MB/column | distinct budget/column |
+|---|---|---|---|---|---|
+| 100 | 20,000 | 36.8 MB | 4.1 MB | 0.0414 | 20 (=2000/100) |
+| 1,000 | 200,000 | 49.5 MB | 7.0 MB | 0.0070 | 20 (clamped) |
+| 10,000 | 2,000,000 | 220.4 MB | 40.9 MB | 0.0041 | 20 (clamped) |
+
+`max_distinct_tracked`는 컬럼 수로 나눈 per-column budget로 적용
+(`max(20, max_distinct_tracked // columns)`)되어 10,000컬럼에서도 exact set이
+200,000 values로 bounded.
+
+### 10.7 Export streaming 실측
+
+| 저장 Cell | Export time | Peak RSS growth | Export rows vs stored |
+|---|---|---|---|
+| 1,000,000 | 6.67 s | 0.1 MB | 1,000,000 = 1,000,000 |
+| 2,000,000 | 13.30 s | 0.0 MB | 2,000,000 = 2,000,000 |
+
+### 10.8 Suite 결과
+
+`QT_QPA_PLATFORM=offscreen python -m pytest tests -q` → **197 passed** (v0.5.0: 151).
+새 module: `tests/qa/test_stabilization.py` 44, `tests/qa/test_export_alignment.py` 1.
+
+### 10.9 GUI 종료 크래시 (PySide 6.12 double free) — 실측
+
+macOS crash report (`___BUG_IN_CLIENT_OF_LIBMALLOC_POINTER_BEING_FREED_WAS_NOT_ALLOCATED`,
+`PySide::destructionVisitor → destroyQCoreApplication`) headless GUI 테스트에서 반복 관찰.
+
+원인: `QApplication`이 살아 있는 동안 Python GC가 QWidget 그래프 먼저 삭제 → Qt 종료 시
+이미 free된 pointer를 PySide cleanup가 한 번 더 free.
+
+| 패턴 (offscreen, subprocess 각각) | runs | abnormal exit |
+| --- | ---: | ---: |
+| ResultWindow + SettingsWindow + AnalysisWindow 생성 후 GC | 60 | **13** |
+| ResultWindow + MainWindow 생성 후 GC | 50 | **10** |
+| 위와 동일 + `close()` + `deleteLater()` + `processEvents()` | 60 | **0** |
+| MainWindow + ResultWindow + `close_widgets()` | 60 | **0** |
+| MainWindow만 3회 생성 (teardown 없음) | 30 | 0 |
+
+Crash은 MainWindow 단독이 아니라 Cell 상세 테이블 + detail grid 조합에서 발생; 같은
+코드 경로가 test fixture에서 반복 실행될 때 약 1/5 확률로 abort했다.
+
+Fix: `app/ui/lifecycle.close_widgets()`를 GUI 테스트 fixture와 `run_gui()`에서 호출.
+Regression test: `test_gui_teardown_does_not_abort_the_interpreter` (6 runs 전 clean).
+`MainWindow.closeEvent`는 임시 SQLite 상세저장을 정리하도록 유지 (v0.6.0 P2 lifecycle).
+
+## 11. 미해결 · 운영 제약
 
 1. **GGUF model binary 없음** → model load time·추론 속도·model memory 모두 미실측.
 2. **llama-cpp-python 미설치** → llama.cpp path is 실행d only through fake-module tests.

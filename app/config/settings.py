@@ -38,6 +38,12 @@ class AnalysisConfig:
     max_detail_cells: int = 50_000
     # Where the detail database lives; empty means a temporary file per analysis.
     detail_store_path: str = ""
+    # csv module field ceiling. A field longer than this is reported as a parse
+    # error (counted in rows_error) rather than silently discarded. It is set
+    # per file so JSON/Base64 columns are not rejected by the 131072 default.
+    max_field_chars: int = 10_000_000
+    # How many cells the GUI renders for one row at a time.
+    gui_cell_page_size: int = 200
     # AI is never called per cell/row: only ambiguous rows, capped like this.
     max_ai_row_reviews: int = 100
     # AI column judgement is selective: columns already settled by the rule engine

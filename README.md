@@ -36,16 +36,19 @@ Options: `--encoding`, `--delimiter`, `--header`, `--batch-size`, `--mode
 (auto|sampling|full)`, `--no-ai`, `--cpu-only`, `--jev-model`, `--debug`, `--json`,
 `--report-json <path>`, `--gui`, plus the detail/AI controls `--detail-store`,
 `--max-detail-rows`, `--max-detail-cells`, `--max-ai-row-reviews`,
-`--max-ai-column-reviews`, `--ai-column-reviews (selective|all|none)`.
+`--max-ai-column-reviews`, `--ai-column-reviews (selective|all|none)`,
+`--max-field-chars`, `--gui-cell-page-size`.
 
 ## Features
 
 - Auto detection of encoding (UTF-8, UTF-8 BOM, CP949, EUC-KR, UTF-16) and
   delimiter (comma, semicolon, TAB, pipe); headerless files get `COL_001` names.
-- 25 detectors: 주민등록번호(체크섬), 여권, 운전면허, 외국인등록, SSN, 국가보험,
+- 29 detectors: 24 rule types - 주민등록번호(체크섬), 여권, 운전면허, 외국인등록, SSN, 국가보험,
   카드번호(Luhn), 은행계좌(체크섬), 위도/경도, 이름, 이메일, 전화번호, 상세주소,
   생년월일, IMSI, IMEI, 지문/홍채 후보, `.sec`/`.id`/wildcard 사용자 정의 ID,
-  SN/UUID/MAC/IP/Postcode(낮은 우선순위).
+  SN/UUID/MAC/IP/Postcode(낮은 우선순위) - plus 5 *interior* scanners that look
+  inside long JSON / Base64 / log-text cells (resident id, phone, card, email,
+  passport) so personal data buried in a big field is still found.
 - Row-level PII detection: every non-empty cell of every row is checked by the
   rule engine, and each hit is reported with row number, column index, type,
   masked value, cell verdict, confidence and the row-context basis (e.g.
@@ -116,7 +119,7 @@ piiscan-model-0.8b.zip   508.6 MB   0.8B v3 GGUF + tokenizer
 piiscan-model-2b.zip    1219.1 MB   2B v4 GGUF + tokenizer
 ```
 
-Published at [release v0.5.0](https://github.com/gomin90/piiscan/releases/tag/v0.5.0).
+Published at [release v0.6.0](https://github.com/gomin90/piiscan/releases/tag/v0.6.0).
 Build them yourself with `python tools/make_release_bundle.py --split`, then check integrity with
 `scripts/windows/verify-offline-bundle.ps1`.
 

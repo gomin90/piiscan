@@ -198,21 +198,53 @@ def detect_format(path: str | Path, preview_lines: int = 20) -> FormatProfile:
     )
 
 
-def read_preview(path: str | Path, encoding: str, delimiter: str, rows: int = 20) -> list[list[str]]:
+def read_preview(path: str | Path, encoding: str, delimiter: str, rows: int = 20,
+                 field_limit: int = 10_000_000) -> list[list[str]]:
+    previous_limit = csv.field_size_limit()
+    csv.field_size_limit(field_limit)
     out: list[list[str]] = []
-    with open(path, "r", encoding=encoding, errors="replace", newline="") as handle:
-        for row in csv.reader(handle, delimiter=delimiter):
-            out.append(row)
-            if len(out) >= rows:
-                break
+    try:
+        with open(path, "r", encoding=encoding, errors="replace", newline="") as handle:
+            reader = csv.reader(handle, delimiter=delimiter)
+            while len(out) < rows:
+                try:
+                    row = next(reader)
+                except StopIteration:
+                    break
+                except csv.Error:
+                    continue  # a field above the limit is reported, not fatal
+                if row:
+                    out.append(row)
+    finally:
+        csv.field_size_limit(previous_limit)
     return out
 
 
-def count_rows(path: str | Path, encoding: str, delimiter: str) -> int:
-    """Count data rows without loading the whole file."""
+def count_rows(path: str | Path, encoding: str, delimiter: str,
+               field_limit: int = 10_000_000) -> int:
+    """Count logical CSV records without loading the file.
+
+    Quote-aware and tolerant of a field that still exceeds the parser limit: such
+    a record is counted as one row rather than making the pre-pass fail.
+    """
+    previous_limit = csv.field_size_limit()
+    csv.field_size_limit(field_limit)
     total = 0
-    with open(path, "r", encoding=encoding, errors="replace", newline="") as handle:
-        for row in csv.reader(handle, delimiter=delimiter):
-            if row:
-                total += 1
+    try:
+        with open(path, "r", encoding=encoding, errors="replace", newline="") as handle:
+            reader = csv.reader(handle, delimiter=delimiter)
+            while True:
+                try:
+                    row = next(reader)
+                except StopIteration:
+                    break
+                except csv.Error:
+                    # A record the parser cannot read (e.g. a field above the limit)
+                    # is still one row of the file: count it, then keep going.
+                    total += 1
+                    continue
+                if row:
+                    total += 1
+    finally:
+        csv.field_size_limit(previous_limit)
     return total

@@ -55,6 +55,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-detail-cells", type=int, default=50000,
                         help="RAM Cell 캐시 한도 (전체 Cell 상세는 SQLite)")
     parser.add_argument("--max-ai-row-reviews", type=int, default=100, help="AI Row 문맥 판단 최대")
+    parser.add_argument("--max-field-chars", type=int, default=10_000_000,
+                        help="CSV 필드 최대 길이 (초과 필드는 parse error로 집계)")
+    parser.add_argument("--gui-cell-page-size", type=int, default=200,
+                        help="GUI에서 한 화면에 렌더링하는 Cell 상세 수")
     parser.add_argument("--max-ai-column-reviews", type=int, default=200, help="AI 컬럼 판단 최대 횟수")
     parser.add_argument("--ai-column-reviews", choices=["selective", "all", "none"], default="selective",
                         help="AI 컬럼 판단 범위: 규칙으로 확정된 컬럼 skipping(selective) / 전부(all) / 없음(none)")
@@ -93,6 +97,8 @@ def run_cli(args) -> int:
     config.max_ai_row_reviews = args.max_ai_row_reviews
     config.max_ai_column_reviews = args.max_ai_column_reviews
     config.ai_column_reviews = args.ai_column_reviews
+    config.max_field_chars = args.max_field_chars
+    config.gui_cell_page_size = args.gui_cell_page_size
 
     logger = get_logger()
     diagnostics = Diagnostics(enabled=args.debug)
@@ -109,59 +115,79 @@ def run_cli(args) -> int:
 
     llm = create_ai_engine(config, hardware)
     results = []
-    for path in files:
-        overrides = {}
-        if args.encoding:
-            overrides["encoding"] = args.encoding
-        if args.delimiter:
-            overrides["delimiter"] = args.delimiter if args.delimiter != "\\t" else "\t"
-        if args.header:
-            overrides["has_header"] = args.header == "yes"
-        result = analyse_file(path, config, llm, diagnostics=diagnostics, overrides=overrides)
-        results.append(result)
-        counts = result.cell_counts
-        logger.info(
-            "%s -> Row %d / Cell %d 전수 검사, 개인정보 Row %d건, 컬럼-유형 %d건, "
-            "위험도 높음 %d건 (%.2fs)",
-            Path(path).name,
-            counts.get("rows_inspected", 0),
-            counts.get("cells_inspected", 0),
-            len(result.row_records),
-            len(result.results),
-            sum(1 for r in result.results if r.risk_level in ("매우 높음", "높음")),
-            result.elapsed_seconds,
-        )
-        logger.info(
-            "Row 단위: Cell hits %d (빈 Cell %d, 규칙 호출 %d), 상세 저장 Row %d / Cell %d (%s), AI 판단 %d회",
-            counts.get("cell_hits", 0),
-            counts.get("empty_cells", 0),
-            counts.get("detector_calls", 0),
-            counts.get("detail_rows_stored", 0),
-            counts.get("detail_cells_stored", 0),
-            counts.get("detail_store_path", ""),
-            result.ai_summary.get("decisions", 0),
-        )
-        audit = result.ai_audit
-        if audit:
+    try:
+        # A temporary detail store must not survive an exception: the finally
+        # block below always releases it (important on Windows, where a leaked
+        # WAL file keeps the directory dirty).
+        for path in files:
+            overrides = {}
+            if args.encoding:
+                overrides["encoding"] = args.encoding
+            if args.delimiter:
+                overrides["delimiter"] = args.delimiter if args.delimiter != "\\t" else "\t"
+            if args.header:
+                overrides["has_header"] = args.header == "yes"
+            result = analyse_file(path, config, llm, diagnostics=diagnostics, overrides=overrides)
+            results.append(result)
+            counts = result.cell_counts
             logger.info(
-                "AI 감사: 컬럼 판단 %d 시도(성공 %d, 실패 %d, 생략 %d) / Row 판단 %d 시도(성공 %d, 실패 %d, 생략 %d)",
-                audit.get("attempts", 0), audit.get("success", 0), audit.get("failed", 0), audit.get("skipped", 0),
-                audit.get("row", {}).get("attempts", 0), audit.get("row", {}).get("success", 0),
-                audit.get("row", {}).get("failed", 0), audit.get("row", {}).get("skipped", 0),
+                "%s -> Row %d / Cell %d 전수 검사, 개인정보 Row %d건, 컬럼-유형 %d건, "
+                "위험도 높음 %d건 (%.2fs)",
+                Path(path).name,
+                counts.get("rows_inspected", 0),
+                counts.get("cells_inspected", 0),
+                # Row count comes from the store, not the memory cache, so a file with
+                # more hits than max_detail_rows is not under-reported.
+                counts.get("detail_rows_stored", len(result.row_records)),
+                len(result.results),
+                sum(1 for r in result.results if r.risk_level in ("매우 높음", "높음")),
+                result.elapsed_seconds,
             )
+            logger.info(
+                "Row 단위: Cell hits %d (빈 Cell %d, 규칙 호출 %d), 상세 저장 Row %d / Cell %d (%s), AI 판단 %d회",
+                counts.get("cell_hits", 0),
+                counts.get("empty_cells", 0),
+                counts.get("detector_calls", 0),
+                counts.get("detail_rows_stored", 0),
+                counts.get("detail_cells_stored", 0),
+                counts.get("detail_store_path", ""),
+                result.ai_summary.get("decisions", 0),
+            )
+            audit = result.ai_audit
+            if audit:
+                logger.info(
+                    "AI 감사: 컬럼 판단 %d 시도(성공 %d, 실패 %d, 생략 %d) / Row 판단 %d 시도(성공 %d, 실패 %d, 생략 %d)",
+                    audit.get("attempts", 0), audit.get("success", 0), audit.get("failed", 0), audit.get("skipped", 0),
+                    audit.get("row", {}).get("attempts", 0), audit.get("row", {}).get("success", 0),
+                    audit.get("row", {}).get("failed", 0), audit.get("row", {}).get("skipped", 0),
+                )
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = Path(args.output_dir)
-    flat_results = [row for result in results for row in result.results]
-    csv_path = write_csv(flat_results, output_dir / f"privacy_results_{timestamp}.csv")
-    txt_path = write_txt(results, output_dir / f"privacy_report_{timestamp}.txt")
-    hits_path = write_hit_rows(results, output_dir / f"privacy_hits_{timestamp}.csv")
-    rows_path = write_row_records(results, output_dir / f"privacy_rows_{timestamp}.csv")
-    logger.info("결과: %s / %s / %s / %s", csv_path, txt_path, hits_path, rows_path)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path(args.output_dir)
+        flat_results = [row for result in results for row in result.results]
+        csv_path = write_csv(flat_results, output_dir / f"privacy_results_{timestamp}.csv")
+        txt_path = write_txt(results, output_dir / f"privacy_report_{timestamp}.txt")
+        hits_path = write_hit_rows(results, output_dir / f"privacy_hits_{timestamp}.csv")
+        rows_path = write_row_records(results, output_dir / f"privacy_rows_{timestamp}.csv")
+        logger.info("결과: %s / %s / %s / %s (Export %d Cell / %d Row)",
+                    csv_path, txt_path, hits_path, rows_path,
+                    write_hit_rows.rows_written, write_row_records.rows_written)
+    finally:
+        cleanup = []
+        for result in results:
+            store = getattr(result, "detail_store", None)
+            if store is not None:
+                status = store.cleanup()
+                cleanup.append(status)
+                if status["temporary"]:
+                    logger.info("임시 상세 저장소 정리: %s (removed=%s)",
+                                status["detail_store_path"], status["detail_store_removed"])
+                else:
+                    logger.info("상세 저장소 유지 (--detail-store): %s", status["detail_store_path"])
     for result in results:
-        store = getattr(result, "detail_store", None)
-        if store is not None:
-            store.close()
+        result.cell_counts["detail_store_cleanup"] = next(
+            (c["detail_store_removed"] for c in cleanup
+             if c["detail_store_path"] == result.cell_counts.get("detail_store_path")), False)
 
     report = {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

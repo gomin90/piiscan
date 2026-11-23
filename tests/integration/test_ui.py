@@ -11,6 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from app.ui.lifecycle import close_widgets  # noqa: E402
 from app.ui.main_window import MainWindow  # noqa: E402
 
 
@@ -20,4 +21,4 @@ def test_main_window_builds():
     assert window.analysis_tab is not None
     assert window.selector.files == []
     assert window.progress is not None
-    window.close()
+    close_widgets([window])

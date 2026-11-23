@@ -1,12 +1,15 @@
 """QA: GUI behaviour in a headless (offscreen) Qt session.
 
 Verifies that the settings pane really feeds the analysis engine, that the
-diagnostics tab is populated in debug mode, and that GUI-generated exports
-contain no raw personal data.
+diagnostics tab is populated in debug mode, that GUI-generated exports contain
+no raw personal data, and that the widget graph is handed back to Qt before the
+process exits (PySide 6.12 aborts with a libmalloc double free otherwise).
 """
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -21,6 +24,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from app.config.settings import AnalysisConfig  # noqa: E402
+from app.ui.lifecycle import close_widgets  # noqa: E402
 from app.ui.main_window import MainWindow  # noqa: E402
 
 RAW = ["900101-1234567", "010-1234-5678", "min.kim@example.com", "1234-5678-9012-3456", "R12345678"]
@@ -30,6 +34,18 @@ RAW = ["900101-1234567", "010-1234-5678", "min.kim@example.com", "1234-5678-9012
 def app():
     application = QApplication.instance() or QApplication()
     yield application
+
+
+@pytest.fixture()
+def gui_window(app):
+    """A MainWindow that is handed back to Qt before the process exits.
+
+    PySide aborts if the widget graph is garbage-collected while the application
+    is still alive (see app/ui/lifecycle.py).
+    """
+    window = MainWindow()
+    yield window
+    close_widgets([window])
 
 
 @pytest.fixture()
@@ -43,8 +59,8 @@ def gui_csv(tmp_path: Path) -> Path:
     return csv
 
 
-def test_settings_apply_reaches_the_engine(app, gui_csv, tmp_path, monkeypatch):
-    window = MainWindow()
+def test_settings_apply_reaches_the_engine(app, gui_window, gui_csv, tmp_path, monkeypatch):
+    window = gui_window
     window.settings_window.batch_box.setValue(250)
     window.settings_window.thread_box.setValue(4)
     window.settings_window.debug_check.setChecked(True)
@@ -60,8 +76,8 @@ def test_settings_apply_reaches_the_engine(app, gui_csv, tmp_path, monkeypatch):
     assert window.debug_label.text().strip() and "디버그 정보 없음" not in window.debug_label.text()
 
 
-def test_gui_exports_do_not_contain_raw_values(app, gui_csv, tmp_path, monkeypatch):
-    window = MainWindow()
+def test_gui_exports_do_not_contain_raw_values(app, gui_window, gui_csv, tmp_path, monkeypatch):
+    window = gui_window
     window.selector.files = [gui_csv]
     monkeypatch.chdir(tmp_path)
     window.run_analysis()
@@ -79,9 +95,9 @@ def test_gui_exports_do_not_contain_raw_values(app, gui_csv, tmp_path, monkeypat
     assert len(csv_files[0].read_text(encoding="utf-8").splitlines()) > 1
 
 
-def test_gui_form_fields_reach_the_report(app, gui_csv, tmp_path, monkeypatch):
+def test_gui_form_fields_reach_the_report(app, gui_window, gui_csv, tmp_path, monkeypatch):
     """분석 방식 / 테이블명 / 스키마 / 원본 DB 입력이 결과 CSV에 recorded."""
-    window = MainWindow()
+    window = gui_window
     window.settings_window.mode_box.setCurrentText("full")
     window.settings_window.table_box.setText("CUSTOMERS")
     window.settings_window.schema_box.setText("PROD")
@@ -96,8 +112,8 @@ def test_gui_form_fields_reach_the_report(app, gui_csv, tmp_path, monkeypatch):
     assert window.config.mode == "full"
 
 
-def test_result_detail_shows_row_level_hits(app, gui_csv, tmp_path, monkeypatch):
-    window = MainWindow()
+def test_result_detail_shows_row_level_hits(app, gui_window, gui_csv, tmp_path, monkeypatch):
+    window = gui_window
     window.selector.files = [gui_csv]
     monkeypatch.chdir(tmp_path)
     window.run_analysis()
@@ -113,14 +129,14 @@ def test_result_detail_shows_row_level_hits(app, gui_csv, tmp_path, monkeypatch)
     assert window.result_window.hit_table.item(0, 4).text()  # masked value column
 
 
-def test_result_window_paginates_row_detail(app, tmp_path, monkeypatch):
+def test_result_window_paginates_row_detail(app, gui_window, tmp_path, monkeypatch):
     """More rows than the memory cache must still be browsable page by page."""
     csv_path = tmp_path / "many.csv"
     csv_path.write_text(
         "IDX,EMAIL\n" + "\n".join(f"{i},user{i}@example.com" for i in range(1, 601)),
         encoding="utf-8",
     )
-    window = MainWindow()
+    window = gui_window
     window.selector.files = [csv_path]
     monkeypatch.chdir(tmp_path)
     window.run_analysis()
@@ -132,15 +148,18 @@ def test_result_window_paginates_row_detail(app, tmp_path, monkeypatch):
     assert result.next_page.isEnabled() and not result.prev_page.isEnabled()
     result._change_page(1)
     assert result.row_table.item(0, 0).text() == "101"
+    # Cell detail is loaded only for the Row the user selects, capped at one page.
+    result.select_row(result._row_page[0])
     assert result.hit_table.rowCount() > 0
+    assert result.hit_table.rowCount() <= result.cell_page_size
     result._change_page(4)
     assert result.row_table.rowCount() == 100
     assert result.row_table.item(0, 0).text() == "501"
     assert not result.next_page.isEnabled()
 
 
-def test_debug_off_leaves_diagnostics_empty(app, gui_csv, tmp_path, monkeypatch):
-    window = MainWindow()
+def test_debug_off_leaves_diagnostics_empty(app, gui_window, gui_csv, tmp_path, monkeypatch):
+    window = gui_window
     window.config.debug = False
     window.settings_window.debug_check.setChecked(False)
     window.selector.files = [gui_csv]
@@ -149,7 +168,7 @@ def test_debug_off_leaves_diagnostics_empty(app, gui_csv, tmp_path, monkeypatch)
     assert window.diagnostics == []
     assert "디버그 정보 없음" in window.debug_label.text()
 
-def test_file_and_folder_buttons_reach_the_choosers(app, gui_csv, tmp_path, monkeypatch):
+def test_file_and_folder_buttons_reach_the_choosers(app, gui_window, gui_csv, tmp_path, monkeypatch):
     """The CSV/folder buttons must actually invoke the file dialogs."""
     from PySide6.QtWidgets import QFileDialog
 
@@ -177,3 +196,40 @@ def test_file_and_folder_buttons_reach_the_choosers(app, gui_csv, tmp_path, monk
     assert gui_csv in selector.files, "folder button did not register the folder contents"
     assert "선택됨" in selector.info_label.text()
     assert calls == ["open_files", "directory"]
+    close_widgets(selector)
+
+
+def test_gui_teardown_does_not_abort_the_interpreter() -> None:
+    """PySide 6.12 + CPython 3.15 aborts when widgets die before the app.
+
+    Regression test for the macOS crash report
+    `___BUG_IN_CLIENT_OF_LIBMALLOC_POINTER_BEING_FREED_WAS_NOT_ALLOCATED` raised
+    inside `PySide::destructionVisitor` at interpreter exit. Without the
+    `close_widgets()` teardown this exact widget pattern aborted in roughly one
+    out of five processes; with it the pattern is clean over 60 runs.
+    """
+    script = (
+        "import os\n"
+        "os.environ['QT_QPA_PLATFORM'] = 'offscreen'\n"
+        "from PySide6.QtWidgets import QApplication\n"
+        "from app.config.settings import AnalysisConfig\n"
+        "from app.ui.lifecycle import close_widgets\n"
+        "from app.ui.main_window import MainWindow\n"
+        "from app.ui.result_window import ResultWindow\n"
+        "app = QApplication([])\n"
+        "for _ in range(3):\n"
+        "    window = MainWindow()\n"
+        "    detail = ResultWindow(AnalysisConfig(use_ai=False))\n"
+        "    detail.show_rows([])\n"
+        "    close_widgets([window, detail])\n"
+        "print('done')\n"
+    )
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+    failures = []
+    for _ in range(6):
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, env=env
+        )
+        if proc.returncode != 0 or "shared QObject" in proc.stderr:
+            failures.append(proc.returncode)
+    assert not failures, f"Qt teardown aborted {len(failures)}/6 runs: {failures}"

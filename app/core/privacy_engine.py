@@ -30,6 +30,13 @@ from app.core.row_analysis import (
     cell_decision,
 )
 from app.detectors.address import AddressDetector
+from app.detectors.embedded import (
+    EmbeddedCardDetector,
+    EmbeddedEmailDetector,
+    EmbeddedPassportDetector,
+    EmbeddedPhoneDetector,
+    EmbeddedResidentIdDetector,
+)
 from app.detectors.base import Detector, profile_of
 from app.detectors.bank_account import BankAccountDetector
 from app.detectors.birth_date import BirthDateDetector
@@ -106,6 +113,12 @@ def build_detectors(config: AnalysisConfig | None = None) -> list[Detector]:
         MacAddressDetector(),
         IpAddressDetector(),
         PostcodeDetector(),
+        # Interior scanners for long free-text cells (JSON, logs, Base64 blobs).
+        EmbeddedResidentIdDetector(),
+        EmbeddedPhoneDetector(),
+        EmbeddedCardDetector(),
+        EmbeddedEmailDetector(),
+        EmbeddedPassportDetector(),
     ]
     return detectors
 
@@ -118,7 +131,11 @@ class PrivacyEngine:
         for detector in self.detectors:
             for tag in detector.candidate_tags:
                 self.tag_detectors.setdefault(tag, []).append(detector)
-        self.by_type = {detector.type_key: detector for detector in self.detectors}
+        # The first detector registered for a type owns its display metadata;
+        # embedded variants share the type key but must not override it.
+        self.by_type: dict[str, Detector] = {}
+        for detector in self.detectors:
+            self.by_type.setdefault(detector.type_key, detector)
         self.elapsed_rules = 0.0
         self.rows_analysed = 0
         self.store = store or DetailStore(Path(tempfile.mkdtemp(prefix="piiscan-detail-")) / "detail.sqlite")
@@ -172,12 +189,16 @@ class PrivacyEngine:
         for offset, row in enumerate(rows, start=first_row):
             self.rows_inspected += 1
             width = len(row)
-            if width > len(stats):
-                self.extra_cells += width - len(stats)
+            extra = width - self.header_count
+            if extra > 0:
+                # Every field past the header is counted, per row, so the total
+                # number of unexpectedly present cells is exact rather than the
+                # number of columns that happened to be new.
+                self.extra_cells += extra
                 for index in range(len(stats), width):
                     stats.append(ColumnStats(name=f"EXTRA_COL_{index + 1}", index=index,
                                             max_hit_rows=self.config.max_hit_rows))
-                self.extra_columns = max(self.extra_columns, width - self.header_count)
+                self.extra_columns = max(self.extra_columns, extra)
             for index, value in enumerate(row):
                 column = stats[index]
                 profile = profile_of(value)
@@ -190,7 +211,9 @@ class PrivacyEngine:
                     self.detector_calls += 1
                     match = detector.match(value, profile, column.name)
                     if match is not None:
-                        masked = mask_value(value)
+                        # For interior matches the fragment is masked, never the
+                        # whole (potentially huge) cell.
+                        masked = mask_value(match.fragment or value)
                         column.add_hit(match, offset, masked)
                         self.cell_hits += 1
                         if offset > self._last_hit_row:
@@ -308,6 +331,7 @@ class PrivacyEngine:
             "cells_inspected": self.cells_inspected,
             "empty_cells": self.empty_cells,
             "extra_cells": self.extra_cells,
+            "extra_columns": self.extra_columns,
             "detector_calls": self.detector_calls,
             "rows_with_hits": self.rows_with_hits,
             "cell_hits": self.cell_hits,

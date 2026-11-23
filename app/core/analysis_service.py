@@ -1,6 +1,7 @@
 """분석 파이프라인: CSV 검사 -> 규칙 전수 분석 -> 통계 -> AI -> 통합 -> 위험도."""
 from __future__ import annotations
 
+import hashlib
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -35,6 +36,10 @@ class FileResult:
     rows_extra: int
     total_rows: int
     elapsed_seconds: float
+    rows_unparsed: int = 0
+    oversized_fields: int = 0
+    field_char_limit: int = 0
+    parse_errors: list = field(default_factory=list)
     findings: list = field(default_factory=list)
     row_records: list = field(default_factory=list)
     cell_counts: dict = field(default_factory=dict)
@@ -44,6 +49,7 @@ class FileResult:
     ai_summary: dict = field(default_factory=dict)
     ai_audit: dict = field(default_factory=dict)
     detail_store: object = None
+    analysis_id: str = ""
     preview: list = field(default_factory=list)
     timings: dict = field(default_factory=dict)
 
@@ -58,6 +64,10 @@ class FileResult:
             "rows_irregular": self.rows_irregular,
             "rows_short": self.rows_short,
             "rows_extra": self.rows_extra,
+            "rows_unparsed": self.rows_unparsed,
+            "oversized_fields": self.oversized_fields,
+            "field_char_limit": self.field_char_limit,
+            "parse_errors": self.parse_errors,
             "total_rows": self.total_rows,
             "elapsed_seconds": round(self.elapsed_seconds, 3),
             "findings": self.findings,
@@ -69,7 +79,14 @@ class FileResult:
                 "detail_cells_stored": self.cell_counts.get("detail_cells_stored", 0),
                 "detail_cache_rows": self.cell_counts.get("detail_cache_rows", 0),
                 "detail_cache_limit": self.cell_counts.get("detail_cache_limit", 0),
-                "detail_store": self.cell_counts.get("detail_store", ""),
+                "detail_cache_cells": self.cell_counts.get("detail_cache_cells", 0),
+                "detail_cache_cell_limit": self.cell_counts.get("detail_cache_cell_limit", 0),
+                "detail_store_path": self.cell_counts.get("detail_store_path", ""),
+                # The JSON only carries the in-memory cache; the complete detail
+                # is in the SQLite store and in the CSV exports.
+                "detail_rows_in_json": len(self.row_records),
+                "details_complete": self.cell_counts.get("detail_rows_stored", 0) == len(self.row_records),
+                "details_truncated": self.cell_counts.get("detail_rows_stored", 0) > len(self.row_records),
                 "rows": [record.as_dict() for record in self.row_records],
             },
             "protection": [g.as_dict() for g in self.protection],
@@ -88,32 +105,82 @@ CONFIG_ROW_CONTEXT_LIMIT = 12
 
 
 def ai_column_candidates(findings: list[dict], config: AnalysisConfig) -> list[dict]:
-    """Columns that genuinely need a semantic judgement.
+    """Columns that genuinely need a semantic judgement, ranked by uncertainty.
 
     The rule engine already scanned every cell, so a column whose pattern is
-    confirmed and dominant does not need the model. What the AI is good at is
-    ambiguous naming ("AMOUNT" holding card-shaped numbers), competing types and
-    partial matches. Selecting those keeps cell recall untouched - every cell is
-    still rule-checked - while avoiding thousands of model calls on a 10,000
-    column file.
+    confirmed, dominant and unopposed does not need the model. What the AI is good
+    at is ambiguous naming ("AMOUNT" holding card-shaped numbers), competing types
+    and weak evidence. Ranking by priority rather than file order means the most
+    doubtful columns - wherever they sit in the file - are the ones reviewed.
+    Cell recall is untouched: every cell is still rule-checked.
     """
     if config.ai_column_reviews == "none":
         return []
     if config.ai_column_reviews == "all":
         # Explicit "judge every column" mode: identical to the pre-v0.5 behaviour,
         # bounded only by max_ai_column_reviews.
-        return [{"finding": finding, "reason": "전부 AI 판단"} for finding in findings]
-    candidates = []
+        return [{"finding": finding, "reason": "전부 AI 판단", "priority": 0.0} for finding in findings]
+
+    scored: list[dict] = []
     for finding in findings:
         types = finding["types"]
         weak = finding["weak_types"]
         if not types and not weak:
             continue  # no detector evidence at all: nothing for the model to judge
+        all_types = types + weak
+        distinct_types = {t["type_key"] for t in all_types}
         best = max((t["rule_confidence"] for t in types), default=0.0)
-        settled = bool(types) and len(types) == 1 and best >= SETTLED_RULE_CONFIDENCE
-        if not settled:
-            candidates.append({"finding": finding, "reason": "규칙 판정 불확실"})
-    return candidates
+        # Settled means one strong, unopposed type: no weak evidence, no competing
+        # type, and a rule confidence the model could not improve on.
+        settled = (len(types) == 1 and not weak and len(distinct_types) == 1
+                   and best >= SETTLED_RULE_CONFIDENCE)
+        if settled:
+            continue
+        uncertainty = 1.0 - best
+        conflict = max(0, len(distinct_types) - 1)
+        weak_evidence = len(weak)
+        sensitivity = max((t["sensitivity"] for t in all_types), default=0.0)
+        hits = sum(t["hits"] for t in all_types)
+        hint = finding.get("name_affinity", 0.0)
+        priority = (uncertainty + 0.35 * conflict + 0.25 * weak_evidence
+                    + 0.2 * sensitivity + 0.1 * min(hint, 1.0) + 0.001 * min(hits, 500))
+        if conflict:
+            reason = "경합하는 개인정보 유형"
+        elif weak_evidence:
+            reason = "약한/부분 탐지"
+        else:
+            reason = "규칙 판정 불확실"
+        scored.append({"finding": finding, "reason": reason,
+                       "priority": round(priority, 4), "types": sorted(distinct_types)})
+
+    scored.sort(key=lambda item: (-item["priority"], item["finding"]["index"]))
+    return scored
+
+
+def select_column_candidates(candidates: list[dict], limit: int) -> list[dict]:
+    """Pick `limit` columns that represent the whole file.
+
+    The highest-priority columns are taken first, then the remaining slots are
+    spread evenly over the rest of the list so the columns at the right hand end
+    of a wide file are not silently dropped.
+    """
+    if limit <= 0 or not candidates:
+        return []
+    if len(candidates) <= limit:
+        return candidates
+    head = min(limit, max(1, limit * 3 // 4))
+    chosen = candidates[:head]
+    rest = candidates[head:]
+    remaining = limit - head
+    if remaining and rest:
+        # Uniform spread *including the last candidate*, so data in the right-hand
+        # columns of a wide file is never dropped just because it sorts last.
+        if remaining == 1:
+            chosen.append(rest[-1])
+        else:
+            for index in range(remaining):
+                chosen.append(rest[index * (len(rest) - 1) // (remaining - 1)])
+    return chosen
 
 
 def row_context(raw: dict, store, settings: FileSettings) -> dict:
@@ -185,7 +252,7 @@ def analyse_file(
     diagnostics.record("format_detected", encoding=settings.encoding, delimiter=repr(settings.delimiter),
                        header=settings.has_header, columns=profile.column_count)
 
-    loader = CsvLoader(settings)
+    loader = CsvLoader(settings, max_field_chars=config.max_field_chars)
     loader.prepare()
     mode = detect_analysis_mode(loader.total_rows or 0, config.mode, config.sample_rows)
     # "sampling" genuinely truncates the scan; "full"/"auto" stream every row.
@@ -193,11 +260,22 @@ def analyse_file(
     diagnostics.record("analysis_mode", mode=mode, row_limit=row_limit)
 
     # 2단계: 스트리밍 규칙 기반 전수 분석 (batch 1,000행)
-    detail_path = Path(config.detail_store_path) if config.detail_store_path \
-        else Path(tempfile.mkdtemp(prefix="piiscan-detail-")) / "detail.sqlite"
-    store = DetailStore(detail_path)
+    # Each file gets its own database unless the user named one explicitly; in
+    # that shared case every record still carries an analysis_id, so Row 7 of
+    # file A is never confused with Row 7 of file B.
+    temp_dir: Path | None = None
+    if config.detail_store_path:
+        detail_path = Path(config.detail_store_path)
+    else:
+        temp_dir = Path(tempfile.mkdtemp(prefix="piiscan-detail-"))
+        detail_path = temp_dir / "detail.sqlite"
+    analysis_id = f"{Path(path).stem}-{hashlib.sha1(str(Path(path).resolve()).encode()).hexdigest()[:10]}"
+    store = DetailStore(detail_path, analysis_id)
+    store.temp_dir = temp_dir
     engine = PrivacyEngine(config, store)
-    engine.header_count = len(loader.column_names)
+    # The declared header width, not the widest row seen so far, is what makes a
+    # field "extra".
+    engine.header_count = loader.header_length or len(loader.column_names)
     column_count = max(1, len(loader.column_names))
     # Distinct-value memory scales with the number of columns, so the per-column
     # exact set is sized from the file-wide budget (max_distinct_tracked) while
@@ -256,8 +334,10 @@ def analyse_file(
     row_records = engine.finalise_verdicts(stats)
     cell_counts = engine.cell_counts()
     diagnostics.record("rows_parsed", parsed=loader.parsed_rows, errors=loader.error_rows,
-                       empty=loader.empty_rows, irregular=loader.irregular_rows,
-                       short=loader.short_rows, extra=loader.extra_rows)
+                       unparsed=loader.unparsed_rows, empty=loader.empty_rows,
+                       irregular=loader.irregular_rows, short=loader.short_rows,
+                       extra=loader.extra_rows, oversized_fields=loader.oversized_fields,
+                       field_char_limit=loader.max_field_chars)
     diagnostics.record("cell_scan", **cell_counts)
 
     # 3단계: 보호/코드 그룹 분석
@@ -273,9 +353,11 @@ def analyse_file(
                 "policy": config.ai_column_reviews, "limit": config.max_ai_column_reviews}
     if llm.load():
         candidates = ai_column_candidates(findings, config)
-        ai_audit["selected"] = len(candidates)
-        ai_audit["skipped"] = len(findings) - len(candidates)
-        for item in candidates[: config.max_ai_column_reviews]:
+        selected = select_column_candidates(candidates, config.max_ai_column_reviews)
+        ai_audit["candidates"] = len(candidates)
+        ai_audit["selected"] = len(selected)
+        ai_audit["skipped"] = len(findings) - len(selected)
+        for item in selected:
             finding = item["finding"]
             ai_audit["attempts"] += 1
             judgement = llm.judge_column({**finding, "table": settings.table, "select_reason": item["reason"]})
@@ -287,14 +369,13 @@ def analyse_file(
             rss_mb = llm.memory_usage().get("rss_mb") or 0
             if rss_mb > 3500:
                 logger.warning("RAM 한계 감지 -> AI 추론 중단, 규칙 기반 결과 보존")
-                ai_audit["skipped"] += len(candidates) - ai_audit["attempts"]
+                ai_audit["skipped"] += len(selected) - ai_audit["attempts"]
                 llm.close()
                 break
         else:
-            ai_audit["skipped"] += len(candidates) - min(len(candidates), config.max_ai_column_reviews)
-            if len(candidates) > config.max_ai_column_reviews:
+            if len(candidates) > len(selected):
                 diagnostics.record("ai_column_cap", limit=config.max_ai_column_reviews,
-                                   candidates=len(candidates))
+                                   candidates=len(candidates), selected=len(selected))
         # Row 문맥 판정은 규칙이 결론 내리지 못한 Row에만, 제한된 횟수만큼 호출된다.
         # 후보는 detail cache가 아니라 전체 store에서 뽑는다: cap 때문에 AI이 파일
         # 앞부분 Row만 보는 편향을 막는다.
@@ -356,6 +437,10 @@ def analyse_file(
         rows_irregular=loader.irregular_rows,
         rows_short=loader.short_rows,
         rows_extra=loader.extra_rows,
+        rows_unparsed=loader.unparsed_rows,
+        oversized_fields=loader.oversized_fields,
+        field_char_limit=loader.field_limit,
+        parse_errors=list(loader.row_errors),
         total_rows=loader.total_rows or loader.parsed_rows,
         elapsed_seconds=elapsed,
         findings=findings,
@@ -367,6 +452,7 @@ def analyse_file(
         ai_summary=ai_summary,
         ai_audit=ai_audit,
         detail_store=store,
+        analysis_id=analysis_id,
         preview=read_preview(path, settings.encoding, settings.delimiter, 20),
         timings={"rules": round(engine.elapsed_rules, 3), "batch": round(batch_seconds, 3)},
     )

@@ -94,6 +94,10 @@ class ValueProfile:
             tags.add("dot_token")
         if "-" in v or " " in v:
             tags.add("separated")
+        if self.length >= 20:
+            # Long free text (JSON, log lines, Base64) can hide personal data
+            # inside it, so it gets a dedicated tag for interior scanning.
+            tags.add("long_text")
         self.tags = frozenset(tags)
 
     @property
@@ -127,6 +131,9 @@ class Match:
     masked: bool = False
     evidence: str = ""
     confirmed: bool = True
+    # When personal data is found inside a long cell, only the matched fragment
+    # is kept (masked) - never the whole cell.
+    fragment: str = ""
     priority: int = 1
     sensitivity: float = 0.5
 

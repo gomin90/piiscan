@@ -39,6 +39,9 @@ class MainWindow(QWidget):
         self.hardware = detect_hardware()
         self.history: list = []
         self.diagnostics: list[dict] = []
+        # Detail stores are opened per analysis so the user can keep browsing the
+        # full cell detail; temporary ones are removed when the app closes.
+        self._stores: list = []
 
         tabs = QTabWidget()
         self.analysis_tab = QWidget()
@@ -55,7 +58,7 @@ class MainWindow(QWidget):
         selector_layout.addWidget(self.progress)
         tabs.addTab(self.analysis_tab, "파일 분석")
 
-        self.result_window = ResultWindow()
+        self.result_window = ResultWindow(self.config)
         tabs.addTab(self.result_window, "분석 결과")
 
         self.history_table = QTableWidget()
@@ -136,6 +139,8 @@ class MainWindow(QWidget):
                                   ))
             results.append(result)
             self.history.append(result)
+            if getattr(result, "detail_store", None) is not None:
+                self._stores.append(result.detail_store)
             self.history_table.setRowCount(len(self.history))
             row_index = len(self.history) - 1
             highest = max((r.risk_level for r in result.results), default="없음")
@@ -175,6 +180,8 @@ class MainWindow(QWidget):
         write_txt(results, output_dir / f"privacy_report_{stamp}.txt")
         write_hit_rows(results, output_dir / f"privacy_hits_{stamp}.csv")
         write_row_records(results, output_dir / f"privacy_rows_{stamp}.csv")
+        get_logger("gui").info(f"결과 Export: {stamp} (Cell {write_hit_rows.rows_written:,}건, "
+                               f"Row {write_row_records.rows_written:,}건)")
         self.result_window.show_results([r for result in results for r in result.results])
         self.result_window.show_rows(results)
         self.diagnostics = diagnostics.events
@@ -188,12 +195,33 @@ class MainWindow(QWidget):
             self.debug_label.setText("디버그 정보 없음 (환경 설정에서 디버그 로그를 활성화하세요).")
 
 
+    def cleanup_stores(self) -> None:
+        """Release every detail store; only temporary stores are deleted."""
+        for store in self._stores:
+            status = store.cleanup()
+            get_logger("gui").info(
+                f"detail store {status['detail_store_path']} "
+                f"{'removed' if status['detail_store_removed'] else 'kept'}"
+            )
+        self._stores = []
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self.cleanup_stores()
+        event.accept()
+
+
 def run_gui(args=None) -> int:
     import sys
 
     from PySide6.QtWidgets import QApplication
 
+    from app.ui.lifecycle import close_widgets
+
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
-    return app.exec()
+    code = app.exec()
+    # Hand the widget graph back to Qt before the interpreter finalises: PySide
+    # 6.12 double-frees widgets that Python garbage-collects first.
+    close_widgets(window)
+    return code

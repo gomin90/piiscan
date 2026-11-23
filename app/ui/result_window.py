@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.export.hit_exporter import collect_hit_cells, collect_row_records
+from app.config.settings import AnalysisConfig
 
 COLUMNS = [
     "파일명",
@@ -40,8 +40,17 @@ RISK_ORDER = {"매우 높음": 0, "높음": 1, "보통": 2, "낮음": 3, "확인
 
 
 class ResultWindow(QWidget):
-    def __init__(self) -> None:
+    """Column findings plus paginated Row/Cell detail.
+
+    Cell detail is rendered only for the Row the user selects, at most
+    `gui_cell_page_size` cells per page, so a 10,000-column Row cannot fill the
+    widget with ten million items. The full detail always stays in SQLite.
+    """
+
+    def __init__(self, config: AnalysisConfig | None = None) -> None:
         super().__init__()
+        self.config = config or AnalysisConfig()
+        self.cell_page_size = max(1, self.config.gui_cell_page_size)
         layout = QVBoxLayout(self)
         self.summary = QLabel("분석 결과 없음")
         layout.addWidget(self.summary)
@@ -54,6 +63,12 @@ class ResultWindow(QWidget):
             self.table.setColumnWidth(index, width)
         self.table.cellClicked.connect(self._on_row_clicked)
         self.rows: list = []
+        self._file_results: list = []
+        self._page = 0
+        self._page_size = 200
+        self._row_page: list[dict] = []
+        self._selected_row: dict | None = None
+        self._cell_page = 0
         layout.addWidget(self.table)
         self.detail = QWidget()
         detail_layout = QGridLayout(self.detail)
@@ -86,18 +101,36 @@ class ResultWindow(QWidget):
         )
         for index, width in enumerate([70, 90, 130, 130, 150, 90, 110]):
             self.row_table.setColumnWidth(index, width)
-        layout.addWidget(QLabel("Row 단위 판정 (확정 개인정보와 검토 필요 구분)"))
+        layout.addWidget(QLabel("Row 판정 목록 (Row를 선택하면 그 Row의 Cell 상세)"))
+        self.row_table.cellClicked.connect(self._on_result_row_clicked)
         layout.addWidget(self.row_table)
         self.row_context = QLabel("Row 상세 없음")
         layout.addWidget(self.row_context)
         page_row = QHBoxLayout()
-        self.prev_page = QPushButton("이전 페이지")
-        self.next_page = QPushButton("다음 페이지")
+        self.prev_page = QPushButton("이전 Row 페이지")
+        self.next_page = QPushButton("다음 Row 페이지")
         self.prev_page.clicked.connect(lambda: self._change_page(-1))
         self.next_page.clicked.connect(lambda: self._change_page(1))
         page_row.addWidget(self.prev_page)
         page_row.addWidget(self.next_page)
         layout.addLayout(page_row)
+
+        # Cell detail is rendered only for the Row the user selects, and only
+        # `cell_page_size` cells at a time, so a 10,000-column Row cannot flood
+        # the widget. The complete cell list always stays queryable in SQLite.
+        layout.addWidget(QLabel("선택한 Row의 Cell 상세"))
+        self.cell_label = QLabel("Row를 선택하면 Cell 상세")
+        layout.addWidget(self.cell_label)
+        cell_row = QHBoxLayout()
+        self.prev_cell_page = QPushButton("이전 Cell 페이지")
+        self.next_cell_page = QPushButton("다음 Cell 페이지")
+        self.prev_cell_page.clicked.connect(lambda: self._change_cell_page(-1))
+        self.next_cell_page.clicked.connect(lambda: self._change_cell_page(1))
+        self.prev_cell_page.setEnabled(False)
+        self.next_cell_page.setEnabled(False)
+        cell_row.addWidget(self.prev_cell_page)
+        cell_row.addWidget(self.next_cell_page)
+        layout.addLayout(cell_row)
 
     def show_hits(self, result) -> None:
         rows = result.hit_rows if hasattr(result, "hit_rows") else []
@@ -132,24 +165,16 @@ class ResultWindow(QWidget):
             ai = record.get("ai_review") or {}
             self.row_table.setItem(index, 6, QTableWidgetItem(ai.get("personality", "-") or "-"))
 
-        cells = []
-        for record in records:
-            store = record.get("_store")
-            if store is not None:
-                cells.extend(store.cells_between_rows(record["row"], record["row"]))
-        self.hit_table.setRowCount(len(cells))
-        for index, cell in enumerate(cells):
-            self.hit_table.setItem(index, 0, QTableWidgetItem(str(cell["row"])))
-            self.hit_table.setItem(index, 1, QTableWidgetItem(cell["column"]))
-            self.hit_table.setItem(index, 2, QTableWidgetItem(str(cell["column_index"])))
-            self.hit_table.setItem(index, 3, QTableWidgetItem(cell["display_name"]))
-            self.hit_table.setItem(index, 4, QTableWidgetItem(cell["decision"]))
-            self.hit_table.setItem(index, 5, QTableWidgetItem(cell["masked_value"]))
+        self._row_page = records
+        self._selected_row = None
+        self._cell_page = 0
+        self.hit_table.setRowCount(0)
+        self.cell_label.setText("Cell 상세: Row를 선택하면 그 Row의 Cell 상세 (전량 SQLite)")
 
         last_page = max(0, (total - 1) // page_size)
         self.row_context.setText(
             f"Row 상세 {total:,}건 저장됨 (SQLite) - 페이지 {page + 1}/{last_page + 1}, "
-            f"이 페이지 {len(records)}건 / Cell 상세 {len(cells)}건"
+            f"이 페이지 {len(records)}건"
         )
         self.prev_page.setEnabled(page > 0)
         self.next_page.setEnabled(page < last_page)
@@ -176,6 +201,57 @@ class ResultWindow(QWidget):
 
     def _change_page(self, delta: int) -> None:
         self.show_rows(self._file_results, self._page + delta, self._page_size)
+
+    def _on_result_row_clicked(self, index: int, _column: int) -> None:
+        if 0 <= index < len(self._row_page):
+            self.select_row(self._row_page[index])
+
+    def select_row(self, record: dict) -> None:
+        """Load one Row's cell detail from SQLite and render one page of it."""
+        self._selected_row = record
+        self._cell_page = 0
+        self._render_cell_page()
+
+    def _cell_total(self) -> int:
+        record = self._selected_row
+        store = record.get("_store")
+        if store is None:
+            return record.get("cell_count", 0)
+        return store.row_cell_count(record["row"])
+
+    def _render_cell_page(self) -> None:
+        record = self._selected_row
+        if record is None:
+            return
+        total = self._cell_total()
+        page_size = self.cell_page_size
+        last_page = max(0, (total - 1) // page_size)
+        self._cell_page = min(self._cell_page, last_page)
+        offset = self._cell_page * page_size
+        store = record.get("_store")
+        if store is not None:
+            cells = list(store.cells_for_row(record["row"], offset=offset, limit=page_size))
+        else:
+            cells = [cell.as_dict() for cell in record.get("_cells", [])][offset:offset + page_size]
+        self.hit_table.setRowCount(len(cells))
+        for index, cell in enumerate(cells):
+            self.hit_table.setItem(index, 0, QTableWidgetItem(str(cell["row"])))
+            self.hit_table.setItem(index, 1, QTableWidgetItem(cell["column"]))
+            self.hit_table.setItem(index, 2, QTableWidgetItem(str(cell["column_index"])))
+            self.hit_table.setItem(index, 3, QTableWidgetItem(cell["display_name"]))
+            self.hit_table.setItem(index, 4, QTableWidgetItem(cell["decision"]))
+            self.hit_table.setItem(index, 5, QTableWidgetItem(cell["masked_value"]))
+        self.cell_label.setText(
+            f"Row {record['row']} Cell 상세 {total:,}건 (SQLite) - "
+            f"Cell 페이지 {self._cell_page + 1}/{last_page + 1}, 이 페이지 {len(cells)}건 "
+            f"(화면 상한 {page_size})"
+        )
+        self.prev_cell_page.setEnabled(self._cell_page > 0)
+        self.next_cell_page.setEnabled(self._cell_page < last_page)
+
+    def _change_cell_page(self, delta: int) -> None:
+        self._cell_page += delta
+        self._render_cell_page()
 
     def show_results(self, results: list) -> None:
         rows = sorted(results, key=lambda r: (RISK_ORDER.get(r.risk_level, 9), -r.hits))

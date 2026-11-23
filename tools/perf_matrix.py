@@ -22,6 +22,7 @@ import argparse
 import json
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -113,12 +114,62 @@ class CountingScorer:
         pass
 
 
-def peak_rss_mb() -> float:
-    if psutil:
-        return psutil.Process().memory_info().rss / (1024 ** 2)
-    import resource
+class PeakRSS:
+    """Sampled peak resident memory.
 
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+    `psutil.Process().memory_info().rss` is the RSS *right now*, not the peak, so
+    the peak is tracked by sampling it on a background thread and keeping the
+    maximum. On platforms without psutil we fall back to the kernel's
+    `ru_maxrss`, which is a true high-water mark but is per-process lifetime, so
+    it is reported separately as an upper bound.
+
+    Units: MiB (RSS bytes / 1024^2). Sample interval: 25 ms.
+    """
+
+    def __init__(self, interval: float = 0.025):
+        self.interval = interval
+        self.samples = 0
+        self.max_rss = 0.0
+        self.stop = threading.Event()
+        self.thread = None
+
+    def start(self) -> None:
+        if not psutil:
+            return
+        proc = psutil.Process()
+
+        def sample():
+            while not self.stop.is_set():
+                try:
+                    rss = proc.memory_info().rss / (1024 ** 2)
+                except Exception:
+                    rss = 0.0
+                self.samples += 1
+                if rss > self.max_rss:
+                    self.max_rss = rss
+                self.stop.wait(self.interval)
+
+        self.thread = threading.Thread(target=sample, daemon=True)
+        self.thread.start()
+
+    def finish(self) -> dict:
+        if self.thread is not None:
+            self.stop.set()
+            self.thread.join(timeout=1.0)
+        import resource
+
+        rusage_max = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # Linux reports KiB, macOS reports bytes.
+        if sys.platform == "darwin":
+            rusage_max /= 1024 ** 2
+        else:
+            rusage_max /= 1024.0
+        return {
+            "peak_rss_mb": round(self.max_rss, 1),
+            "rss_samples": self.samples,
+            "lifetime_max_rss_mb": round(rusage_max, 1),
+            "measurement": "psutil RSS sampled every 25 ms (max over sampling window)",
+        }
 
 
 def prf(tp: int, fp: int, fn: int) -> dict:
@@ -131,7 +182,8 @@ def prf(tp: int, fp: int, fn: int) -> dict:
 
 def run_scenario(name: str, rows: int, columns: int, mode: str) -> dict:
     path, labelled_rows, labelled_cells = build_csv(rows, columns)
-    start_rss = peak_rss_mb()
+    monitor = PeakRSS()
+    monitor.start()
     started = time.perf_counter()
 
     review_mode = "selective" if mode == "real" else mode
@@ -184,9 +236,7 @@ def run_scenario(name: str, rows: int, columns: int, mode: str) -> dict:
         "rule_seconds": round(result.timings.get("rules", 0.0), 3),
         "ai_seconds": round(result.ai_summary.get("inference_seconds", 0.0), 3),
         "total_seconds": round(total_seconds, 3),
-        "rss_start_mb": round(start_rss, 1),
-        "rss_end_mb": round(peak_rss_mb(), 1),
-        "rss_growth_mb": round(peak_rss_mb() - start_rss, 1),
+        **monitor.finish(),
         "gpu_backend": hardware.backend,
         "gpu_vram_gb": hardware.vram_total_gb,
         "cell_metrics": cell_metrics,

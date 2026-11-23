@@ -64,9 +64,19 @@ Cell evidence는 삭제되지 않는다.
 * 결과 탭의 **Row 단위 판정** table: 행번호 / 개인정보 상태(확정·검토 필요·없음) /
   확정 개인정보 / 검토 필요 개인정보 / 발생 컬럼 / 위험도 / AI Row 판정.
 * **Cell 상세** table: 행번호 / 컬럼 / 컬럼 인덱스 / 유형 / 판정 / 탐지값(마스킹).
+  Row를 클릭하면 그 Row의 Cell 상세만 로드되며, 한 화면에 기본 200 Cell
+  (`gui_cell_page_size`, CLI `--gui-cell-page-size`)만 렌더링한다. Cell 페이지
+  buttons(`이전/다음 Cell 페이지`)로 전체 Cell 상세를 SQLite에서 계속 조회할 수 있다.
 * Row 상세는 SQLite detail store에 전량 저장되며 GUI는 페이지(기본 200 Row)로 조회한다.
   `--detail-store <path>`로 저장 파일을 지정할 수 있고, 저장 건수는 GUI progress pane와
-  TXT 보고서("상세 저장: Row N / Cell M")에서 확인할 수 있다.
+  TXT 보고서("상세 저장: Row N / Cell M")에서 확인할 수 있다. 지정하지면 파일별 임시 DB가
+  생성되고 CLI는 Export 완료 후, GUI는 프로그램 종료 시 임시 DB(WAL/SHM 포함)를 삭제한다.
+  명시적으로 경로 지정하면 보존된다.
+* 여러 파일을 같은 `--detail-store`에 분석하면 파일별로 `analysis_id`로 분리되어 같은
+  Row 번호라도 Results 섞이지 않는다.
+* 긴 JSON/Base64/log Cell 안의 개인정보도 interior detector로 검사되며, 저장되는 값은
+  매칭된 fragment만 마스킹되어 저장된다. CSV field 한도는 `--max-field-chars`
+  (default 10,000,000)이며 초과 field는 parse error로 집계된다(implicitly discarded 아님).
 * 파일 export: `results/privacy_rows_<timestamp>.csv` (Row 판정, 한 Row 한 line)와
   `results/privacy_hits_<timestamp>.csv` (Cell hit, 한 Cell 한 line).
 * Row 문맥(예: 이름 + 전화번호 + 주소가 같은 Row)은 판정 근거(`판정 근거`)에 recorded.

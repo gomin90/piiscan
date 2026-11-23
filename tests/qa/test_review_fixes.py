@@ -142,7 +142,8 @@ def test_ragged_rows_keep_extra_fields_and_detect_pii(tmp_path: Path):
     assert result.rows_extra == 2
     assert result.rows_short == 1
     assert result.rows_irregular == 3
-    assert result.cell_counts["extra_cells"] == 2
+    # Row 6 adds 2 fields past the header and row 7 adds 1: every one is counted.
+    assert result.cell_counts["extra_cells"] == 3
 
     columns = {cell["column"] for cell in result.detail_store.iter_cells()}
     assert any(column.startswith("EXTRA_COL") for column in columns), columns

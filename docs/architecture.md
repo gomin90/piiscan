@@ -29,7 +29,7 @@ statistics and masked samples. Raw personal data is never sent to the model.
 | app/core/column_stats.py | length buckets, HyperLogLog distinct, masked ratio |
 | app/core/privacy_engine.py | detector orchestration with tag gating, per-cell scan and hit ledger |
 | app/core/row_analysis.py | cell verdict (`개인정보` / `검토 필요` / `형식 유사(무시)`) and Row-level context verdict |
-| app/detectors/*.py | one independent detector class per privacy type (24 registered) |
+| app/detectors/*.py | one independent detector class per privacy type (24 registered) plus app/detectors/embedded.py interior scanners for long JSON/Base64/log cells (5 registered) |
 | app/core/encryption_analyzer.py | base column vs _MASK/_HASH/_ENC relation, value verification |
 | app/core/code_group_analyzer.py | GROUP_CODE / CODE / CODE_NAME meaning |
 | app/core/risk_engine.py | sensitivity, ratio, protection, compound identity |
@@ -90,8 +90,11 @@ The engine reports **where** personal data is, not just which column looked like
 
 - 1,000 row batches, never a full file load, no pandas DataFrame.
 - Detail is streamed into SQLite (`cell_detail` + `row_detail`, one record per Cell
-  hit); RAM keeps at most `max_detail_rows` Row verdicts and `max_detail_cells` Cell
-  records, so a 1,000 x 10,000 file peaks around 0.8 GB instead of ~1.9 GB.
+  hit, scoped by `analysis_id` so several files can share one store); RAM keeps at
+  most `max_detail_rows` Row verdicts and `max_detail_cells` Cell records. Measured
+  with sampled peak RSS (`tools/memory_profile.py --caps ...`, scenario 1,000 x 10,000):
+  2,286 MB unbounded → 1,555 MB at 500,000 cached cells → 1,334 MB at the default
+  50,000, with all 2,000,000 Cell records still stored (447.8 MB store).
 - Distinct values: HyperLogLog plus a bounded exact set sized from
   `max_distinct_tracked / column_count` (HLL precision drops to 10 above 500 columns).
 - Sample values stored masked, at most 6 per column.

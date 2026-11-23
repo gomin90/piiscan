@@ -23,6 +23,7 @@ from app.ai.gpu_detector import detect_hardware  # noqa: E402
 from app.config.settings import AnalysisConfig  # noqa: E402
 from app.core.analysis_service import analyse_file  # noqa: E402
 from app.ui.analysis_window import AnalysisWindow  # noqa: E402
+from app.ui.lifecycle import close_widgets
 from app.ui.result_window import ResultWindow  # noqa: E402
 from app.ui.settings_window import SettingsWindow  # noqa: E402
 
@@ -81,6 +82,7 @@ def main() -> int:
                      if table.horizontalHeaderItem(i).text() == "AI 판정"]
         if ai_column:
             print("AI 판정 sample:", [table.item(r, ai_column[0]).text() for r in range(min(5, table.rowCount()))])
+    close_widgets([settings, analysis, result_window])
     return 0
 
 
