@@ -177,11 +177,15 @@ def _cuda_dll_search_dirs(binary_dir: Path | None) -> list[Path]:
         if entry:
             dirs.append(Path(entry))
     toolkit_root = Path(os.environ.get("CUDA_PATH", r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"))
+    # CUDA 13.x on Windows puts the runtime DLLs in bin\x64; CUDA 11/12 keep them in bin.
+    # Both are checked so a 12.4-era toolkit and a 13.3-era toolkit are both resolved.
     if toolkit_root.exists():
-        dirs.append(toolkit_root / "bin")
+        for candidate in (toolkit_root / "bin", toolkit_root / "bin" / "x64"):
+            dirs.append(candidate)
         for child in toolkit_root.iterdir():
             if child.is_dir():
                 dirs.append(child / "bin")
+                dirs.append(child / "bin" / "x64")
     return [d for d in dirs if d and d.is_dir()]
 
 

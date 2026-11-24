@@ -66,7 +66,27 @@ if ($smi) {
     Write-Host "  nvidia-smi not found -> NVIDIA driver is likely not installed"
 }
 
-Write-Host "=== 2. Backend DLLs installed in $runtime ==="
+Write-Host "=== 2. CUDA toolkit present on the machine ==="
+$cudaRoot = if ($env:CUDA_PATH) { $env:CUDA_PATH } else { "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA" }
+$toolkits = New-Object System.Collections.Generic.List[string]
+if (Test-Path -LiteralPath $cudaRoot) {
+    foreach ($v in (Get-ChildItem -LiteralPath $cudaRoot -Directory)) {
+        if ($v.Name -match '^v?(\d+\.\d+)') { $toolkits.Add($Matches[1]) }
+    }
+}
+if ($nvcc = Get-Command nvcc -ErrorAction SilentlyContinue) {
+    $nv = ((nvcc --version) -join " ")
+    if ($nv -match 'release (\d+\.\d+)') { $toolkits.Add($Matches[1]) }
+}
+if ($toolkits) {
+    Write-Host "  installed CUDA toolkits: $($toolkits | Sort-Object -Unique -Descending | Select-Object -First 5)"
+    if ($toolkits -contains "13.3") { Write-Host "  CUDA 13.3 toolkit found - use the CUDA 13 backend (install-cuda-backend.ps1 -CudaVersion 13.3)." }
+} else {
+    Write-Host "  no CUDA toolkit detected. The CUDA 13 backend can still run on the NVIDIA driver's"
+    Write-Host "  redistributable DLLs if they are on PATH or copied into $runtime."
+}
+
+Write-Host "=== 3. Backend DLLs installed in $runtime ==="
 $dlls = Get-ChildItem -LiteralPath $runtime -Filter *.dll | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
 foreach ($d in $dlls) { Write-Host ("  {0,-28} {1,8} MB" -f $d.Name, $d.MB) }
 $cudaPath = Join-Path $runtime "ggml-cuda.dll"
@@ -76,17 +96,21 @@ if (-not (Test-Path -LiteralPath $cudaPath)) {
     exit 0
 }
 
-Write-Host "=== 3. What ggml-cuda.dll needs ==="
+Write-Host "=== 4. What ggml-cuda.dll needs ==="
 $info = Read-CudaStrings $cudaPath
 Write-Host ("  CUDA runtime DLLs imported: {0}" -f ($info.dlls -join ", "))
 Write-Host ("  GPU architectures compiled in: {0}" -f ($info.archs -join ", "))
 
-Write-Host "=== 4. Can those DLLs be found? ==="
+Write-Host "=== 5. Can those DLLs be found? ==="
 $searchDirs = @($runtime)
 foreach ($entry in ($env:PATH -split ';')) { if ($entry) { $searchDirs += $entry } }
 $cudaRoot = if ($env:CUDA_PATH) { $env:CUDA_PATH } else { "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA" }
 if (Test-Path -LiteralPath $cudaRoot) {
-    foreach ($v in (Get-ChildItem -LiteralPath $cudaRoot -Directory)) { $searchDirs += (Join-Path $v.FullName "bin") }
+    foreach ($v in (Get-ChildItem -LiteralPath $cudaRoot -Directory)) {
+        $searchDirs += (Join-Path $v.FullName "bin")
+        # CUDA 13.x puts cudart/cublas in bin\x64.
+        $searchDirs += (Join-Path $v.FullName "bin\x64")
+    }
 }
 foreach ($needed in $info.dlls) {
     $found = $false
@@ -97,7 +121,7 @@ foreach ($needed in $info.dlls) {
     else { Write-Host ("  {0}: NOT FOUND  <- CUDA backend cannot initialise" -f $needed) }
 }
 
-Write-Host "=== 5. Architecture match ==="
+Write-Host "=== 6. Architecture match ==="
 if ($capability) {
     $cap = ($capability -split ',')[1].Trim()
     $sm = "sm_" + ($cap -replace '\.', '')
@@ -111,7 +135,7 @@ if ($capability) {
     Write-Host "  compute capability not reported by this driver version"
 }
 
-Write-Host "=== 6. What the scorer actually reports ==="
+Write-Host "=== 7. What the scorer actually reports (the only real success test) ==="
 $exe = Join-Path $runtime $Scorer
 if (-not (Test-Path -LiteralPath $exe)) { Write-Host "  $Scorer not found in $runtime"; exit 1 }
 Write-Host "  running $exe --ngl 999 (reads one empty request, then exits)"
@@ -120,7 +144,7 @@ $emptyInput = Join-Path $env:TEMP "gpu-probe-empty.txt"
 [System.IO.File]::WriteAllText($emptyInput, "")
 $process = Start-Process -FilePath $exe -ArgumentList "--model", $Model, "--ngl", "999", "--n-ctx", "4096", "--n-ubatch", "1024" `
     -RedirectStandardInput $emptyInput -RedirectStandardOutput "$runtime\gpu-probe-out.json" `
-    -RedirectStandardError "$runtime\gpu-probe-err.txt" -PassThru -NoWindow
+    -RedirectStandardError "$runtime\gpu-probe-err.txt" -PassThru -WindowStyle Hidden
 $process.WaitForExit(120000)
 if (-not $process.HasExited) { $process.Kill() }
 $out = Get-Content -LiteralPath "$runtime\gpu-probe-out.json" -Raw -ErrorAction SilentlyContinue

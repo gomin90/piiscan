@@ -17,6 +17,8 @@ import time
 from app.ai.gpu_detector import gpu_plan
 from app.ai.jev.decision import (
     ADDRESS_OPTIONS,
+    CODE_MEANING_OPTIONS,
+    CODE_MEANING_QUESTION,
     JEV_TYPE_TO_INTERNAL,
     NAME_CONTEXT_OPTIONS,
     PERSONALITY_OPTIONS,
@@ -37,6 +39,12 @@ TYPE_QUESTION = "이 컬럼의 값은 어떤 개인정보 유형에 가장 해�
 NAME_QUESTION = "이 컬럼의 값은 실제 사람 이름인가, 아니면 다른 종류의 문자열인가?"
 ADDRESS_QUESTION = "이 컬럼의 값은 주소의 어떤 부분인가?"
 PROTECTION_QUESTION = "이 컬럼 데이터의 보호 상태는 무엇인가?"
+CELL_QUESTION = "이 Cell 값은 개인을 식별할 수 있는 정보인가?"
+CELL_OPTIONS = {
+    "PERSONAL_DATA": "개인정보",
+    "NON_PERSONAL_DATA": "개인정보 아님",
+    "UNCERTAIN": "확정할 수 없음",
+}
 
 TYPE_CATEGORY = "intent"
 GENERAL_CATEGORY = "general"
@@ -188,6 +196,9 @@ class JevStyleAdapter:
         self.decisions = 0
         self.failures = 0
         self.row_reviews = 0
+        self.cell_reviews = 0
+        self.metadata_reviews = 0
+        self.cell_batches = 0
         self.peak_rss_mb = 0.0
         self.last_error: str | None = None
         self.scorer_info: dict = {}
@@ -435,6 +446,39 @@ class JevStyleAdapter:
             "samples_used": state["masked_samples"],
         }
 
+    def classify_metadata(self, state: dict) -> dict:
+        """Function B: judge a column from its metadata only (no stored values).
+
+        The state carries the table/column name, comment, type and structure. The
+        model answers the binary "personal vs business code" question, which is the
+        one the 3-choice protocol is measured to answer reliably.
+        """
+        if self.engine is None:
+            return {"ok": False, "error": "AI 미로드", "verdict": None, "relevance": 0.0,
+                    "types": [], "decision": None, "confidence": 0.0}
+        request = JevStyleDecisionRequest("metadata_meaning", state, CODE_MEANING_QUESTION,
+                                         CODE_MEANING_OPTIONS, "choice", GENERAL_CATEGORY)
+        result = self.decide_many([request])[0]
+        self.metadata_reviews += 1
+        if not result.ok:
+            return {"ok": False, "error": result.error or "판정 없음", "verdict": None,
+                    "relevance": 0.0, "types": [], "decision": None, "confidence": 0.0}
+        decision = result.decision
+        # Function B may never claim a column *contains* personal data: the
+        # strongest wording it can produce is "relevant - confirm against values".
+        if decision == "PERSONAL_DATA":
+            verdict = "개인정보 관련" if result.confidence >= 0.6 else "검토 필요"
+            relevance = max(0.6, min(result.confidence, 0.95))
+        elif decision == "SYSTEM_OR_BUSINESS_CODE":
+            verdict = "관련 낮음"
+            relevance = max(0.05, 1.0 - result.confidence)
+        else:
+            verdict = "검토 필요"
+            relevance = 0.4
+        return {"ok": True, "verdict": verdict, "relevance": round(relevance, 3),
+                "types": [], "decision": decision, "confidence": round(result.confidence, 3),
+                "margin": round(result.margin, 3), "latency_ms": round(result.latency_ms, 1)}
+
     def classify_row(self, record: dict) -> dict:
         """Row-context check for ambiguous rows.
 
@@ -481,6 +525,48 @@ class JevStyleAdapter:
             "latency_ms": round(result.latency_ms, 1),
         }
 
+    def classify_cells(self, column_info: dict, cells: list[dict]) -> list[dict]:
+        """Judge many cells of one column in a single batched scorer request.
+
+        Jev-Style batches questions that share one decision state, so the column
+        context is built once and every cell still gets its own question, option
+        set and verdict. Only the masked value and the rule evidence are sent; the
+        raw cell text never reaches the scorer.
+        """
+        if self.engine is None or not cells:
+            return []
+        state = build_column_state(column_info)
+        requests = [
+            JevStyleDecisionRequest(
+                f"cell:{cell['row']}:{cell['column_index']}",
+                state,
+                (
+                    f"{CELL_QUESTION} Row {cell['row']}, "
+                    f"Cell masked {cell.get('masked_value', '')}, "
+                    f"규칙 근거 {cell.get('rule_verdict') or '없음'}"
+                ),
+                CELL_OPTIONS,
+                "choice",
+                GENERAL_CATEGORY,
+            )
+            for cell in cells
+        ]
+        results = self.decide_many(requests)
+        self.cell_reviews += len(results)
+        return [
+            {
+                "row": cell["row"],
+                "column_index": cell["column_index"],
+                "decision": result.decision,
+                "confidence": round(result.confidence, 3),
+                "margin": round(result.margin, 3),
+                "uncertain": result.uncertain,
+                "latency_ms": round(result.latency_ms, 1),
+                "error": result.error,
+            }
+            for cell, result in zip(cells, results)
+        ]
+
     def summary(self) -> dict:
         return {
             "model": self.spec.model_name if self.spec else None,
@@ -497,6 +583,7 @@ class JevStyleAdapter:
             "inference_seconds": round(self.inference_seconds, 3),
             "decisions": self.decisions,
             "row_reviews": self.row_reviews,
+            "metadata_reviews": self.metadata_reviews,
             "failures": self.failures,
             "peak_rss_mb": round(self.peak_rss_mb, 1),
             "context_limit": self.spec.context_limit if self.spec else 0,

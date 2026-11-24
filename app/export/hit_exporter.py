@@ -47,15 +47,52 @@ ROW_FIELDS = [
     ("needs_review", "검토 필요"), ("ai_row", "AI Row 판정"),
 ]
 
+# Every analysed cell, settled or not: the complete Cell-level ledger.
+VERDICT_FIELDS = [
+    ("analysed_at", "분석일시"), ("file", "파일명"), ("db_type", "원본DB"),
+    ("schema", "스키마"), ("table", "테이블명"), ("row_number", "행번호"),
+    ("column", "컬럼명"), ("column_index", "컬럼 인덱스"),
+    ("cell_status", "Cell 판정"), ("privacy_types", "개인정보 유형"),
+    ("rule_verdict", "규칙 판정"), ("ai_verdict", "AI 판정"),
+    ("final_verdict", "최종 판정"), ("confidence", "Cell 신뢰도"),
+    ("decision_method", "판단 방법"), ("needs_review", "검토 필요"),
+    ("masked_value", "마스킹 값"), ("evidence", "판단 근거"),
+]
+
 CELL_HEADERS = [header for _, header in CELL_FIELDS]
 ROW_HEADERS = [header for _, header in ROW_FIELDS]
+VERDICT_HEADERS = [header for _, header in VERDICT_FIELDS]
+
+# Function A: one line per source record (Row identity + its Cell verdict mix).
+RECORD_FIELDS = [
+    ("analysed_at", "분석일시"), ("file", "파일명"), ("db_type", "원본DB"),
+    ("schema", "스키마"), ("table", "테이블명"), ("row_number", "행번호"),
+    ("row_key", "Row 식별자"), ("key_fingerprint", "KEY 지문(HMAC)"),
+    ("total_cells", "Cell 수"), ("key_cells", "KEY 제외 Cell"),
+    ("empty_cells", "빈 Cell"), ("pii_cells", "개인정보 Cell"),
+    ("review_cells", "검토 Cell"), ("non_pii_cells", "비개인정보 Cell"),
+    ("unrated_cells", "미평가 Cell"), ("row_verdict", "Row 판정"),
+    ("has_pii", "개인정보 존재"),
+]
+
+# Function A: identical personal-data values, grouped by HMAC fingerprint.
+GROUP_FIELDS = [
+    ("analysed_at", "분석일시"), ("file", "파일명"), ("db_type", "원본DB"),
+    ("schema", "스키마"), ("table", "테이블명"),
+    ("masked_sample", "개인정보 샘플(마스킹)"), ("fingerprint", "개인정보 지문(HMAC)"),
+    ("privacy_types", "개인정보 유형"),
+    ("occurrences", "발생 횟수"), ("distinct_rows", "Row 수"),
+    ("distinct_records", "KEY 레코드 수"), ("columns", "발생 컬럼"),
+    ("row_keys", "Related Row"), ("first_row", "첫 발생 Row"),
+    ("last_row", "마지막 Row"),
+]
 
 # Re-exported for the QA tests.
-__all__ = ["CELL_HEADERS", "ROW_HEADERS", "CELL_FIELDS", "ROW_FIELDS",
-           "formula_safe", "iter_hit_cells",
+__all__ = ["CELL_HEADERS", "ROW_HEADERS", "VERDICT_HEADERS", "RECORD_FIELDS", "GROUP_FIELDS",
+           "CELL_FIELDS", "ROW_FIELDS", "VERDICT_FIELDS", "formula_safe", "iter_hit_cells", "iter_cell_records",
            "iter_row_records", "iter_row_export_records", "collect_hit_cells",
-           "collect_row_records", "write_hit_rows", "write_row_records",
-           "collect_hit_rows"]
+           "collect_row_records", "write_hit_rows", "write_cell_records",
+           "write_row_records", "write_record_records", "write_group_records", "collect_hit_rows"]
 
 
 def _file_meta(result) -> tuple[str, str, str, str, str]:
@@ -67,6 +104,15 @@ def _file_meta(result) -> tuple[str, str, str, str, str]:
         formula_safe(settings.get("schema", "")),
         formula_safe(settings.get("table", Path(result.path).stem)),
     )
+
+
+def _types_text(value) -> str:
+    """Render the multi-type cell column without splitting a stored string into characters."""
+    if isinstance(value, str):
+        parts = [part.strip() for part in value.split(",") if part.strip()]
+    else:
+        parts = [str(part).strip() for part in (value or []) if str(part).strip()]
+    return ", ".join(formula_safe(part) for part in dict.fromkeys(parts))
 
 
 def iter_row_records(file_results: Iterable) -> Iterable[dict]:
@@ -161,9 +207,106 @@ def iter_row_export_records(file_results: Iterable) -> Iterable[dict]:
             }
 
 
+
+def iter_record_records(file_results: Iterable) -> Iterable[dict]:
+    """Stream one line per source row (KEY identity + Cell verdict mix)."""
+    for result in file_results:
+        analysed_at, file_name, db_type, schema, table = _file_meta(result)
+        store = getattr(result, "detail_store", None)
+        if store is None:
+            continue
+        for record in store.iter_records():
+            yield {
+                "analysed_at": analysed_at,
+                "file": file_name,
+                "db_type": db_type,
+                "schema": schema,
+                "table": table,
+                "row_number": record["row"],
+                "row_key": formula_safe(record["row_key"]),
+                "key_fingerprint": record["key_fingerprint"] or "(KEY 없음)",
+                "total_cells": record["total_cells"],
+                "key_cells": record["key_cells"],
+                "empty_cells": record["empty_cells"],
+                "pii_cells": record["pii_cells"],
+                "review_cells": record["review_cells"],
+                "non_pii_cells": record["non_pii_cells"],
+                "unrated_cells": record["unrated_cells"],
+                "row_verdict": formula_safe(record["status"]),
+                "has_pii": "예" if record["has_pii"] else "아니요",
+            }
+
+
+def iter_group_records(file_results: Iterable) -> Iterable[dict]:
+    """Stream the identical-value groups; the raw value is never in the output."""
+    for result in file_results:
+        analysed_at, file_name, db_type, schema, table = _file_meta(result)
+        store = getattr(result, "detail_store", None)
+        if store is None:
+            continue
+        for group in store.iter_groups():
+            yield {
+                "analysed_at": analysed_at,
+                "file": file_name,
+                "db_type": db_type,
+                "schema": schema,
+                "table": table,
+                "masked_sample": formula_safe(group.get("masked_sample") or ""),
+                "fingerprint": group["fingerprint"],
+                "privacy_types": ", ".join(formula_safe(t) for t in
+                                          dict.fromkeys(group["pii_type"].split(",")) if t),
+                "occurrences": group["occurrences"],
+                "distinct_rows": group["distinct_rows"],
+                "distinct_records": group["distinct_records"],
+                "columns": ", ".join(formula_safe(c) for c in group["columns"]),
+                "row_keys": ", ".join(formula_safe(k) for k in group["key_samples"]),
+                "first_row": group["first_row"],
+                "last_row": group["last_row"],
+            }
+
 def collect_hit_cells(file_results: Iterable) -> list[dict]:
     """Materialised cell detail - kept for tests and small result sets."""
     return list(iter_hit_cells(file_results))
+
+
+def iter_cell_records(file_results: Iterable) -> Iterable[dict]:
+    """Stream the verdict of *every* analysed cell, one CSV line per cell.
+
+    This is the complete Cell ledger: matched, cleared, undecided and empty cells
+    all appear, so the row and column summaries can always be rebuilt from it.
+    """
+    for result in file_results:
+        analysed_at, file_name, db_type, schema, table = _file_meta(result)
+        store = getattr(result, "detail_store", None)
+        if store is None:
+            continue
+        for cell in store.iter_cell_verdicts():
+            types = _types_text(cell.get("privacy_types", ""))
+            yield {
+                "analysed_at": analysed_at,
+                "file": file_name,
+                "db_type": db_type,
+                "schema": schema,
+                "table": table,
+                "row_number": cell["row"],
+                "column": formula_safe(cell["column"]),
+                "column_index": cell["column_index"],
+                "cell_status": formula_safe(cell["cell_status"]),
+                "privacy_types": types,
+                "rule_verdict": formula_safe(cell.get("rule_verdict", "")),
+                "ai_verdict": formula_safe(cell.get("ai_verdict", "")),
+                "final_verdict": formula_safe(cell.get("final_verdict") or cell["cell_status"]),
+                "confidence": round(cell.get("confidence", 0.0), 3),
+                "decision_method": formula_safe(cell.get("decision_method", "")),
+                "needs_review": "예" if cell.get("needs_review") else "아니요",
+                "masked_value": formula_safe(cell.get("masked_value", "")),
+                "evidence": formula_safe(cell.get("evidence", "")),
+            }
+
+
+def collect_cell_records(file_results: Iterable) -> list[dict]:
+    """Materialised Cell ledger - tests and small result sets only."""
+    return list(iter_cell_records(file_results))
 
 
 def collect_row_records(file_results: Iterable) -> list[dict]:
@@ -195,6 +338,18 @@ def write_hit_rows(file_results: Iterable, output: str | Path) -> str:
     return str(output)
 
 
+def write_record_records(file_results: Iterable, output: str | Path) -> str:
+    """KEY-based record report: every source row and its Cell verdict mix."""
+    write_record_records.rows_written = _write(iter_record_records(file_results), RECORD_FIELDS, output)
+    return str(output)
+
+
+def write_group_records(file_results: Iterable, output: str | Path) -> str:
+    """Identical personal-data values grouped by HMAC fingerprint."""
+    write_group_records.rows_written = _write(iter_group_records(file_results), GROUP_FIELDS, output)
+    return str(output)
+
+
 # Backwards-compatible alias for the previous name.
 collect_hit_rows = collect_hit_cells
 
@@ -202,4 +357,10 @@ collect_hit_rows = collect_hit_cells
 def write_row_records(file_results: Iterable, output: str | Path) -> str:
     """Row-level summary: confirmed personal data vs data that still needs review."""
     write_row_records.rows_written = _write(iter_row_export_records(file_results), ROW_FIELDS, output)
+    return str(output)
+
+
+def write_cell_records(file_results: Iterable, output: str | Path) -> str:
+    """Complete Cell ledger: one line for every analysed cell, matched or not."""
+    write_cell_records.rows_written = _write(iter_cell_records(file_results), VERDICT_FIELDS, output)
     return str(output)

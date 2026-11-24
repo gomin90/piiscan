@@ -44,18 +44,26 @@ class LocationDetector(Detector):
         except ValueError:
             return None
         precision = _precision(v)
+        # Without a coordinate-like column name a bare decimal is only a *possible*
+        # coordinate (it could be a rate, a price, pi), so it must never be
+        # confirmed on surface form alone.
+        hinted_only_confident = hinted
         if abs(number) <= 90 and LAT_RE.fullmatch(v):
             kind = "LATITUDE" if hinted and any(h in column_name.upper() for h in ("LAT", "위도")) else "LOCATION"
-            confidence = 0.95 if precision >= 4 else (0.8 if hinted else 0.55)
+            base = 0.95 if precision >= 4 else (0.8 if hinted else 0.55)
+            confidence = base if hinted_only_confident else min(base, 0.55)
             return Match(kind if kind != "LOCATION" else self.type_key,
                          "위도" if kind == "LATITUDE" else "위치좌표(위도 범위)",
                          confidence, evidence="위도 범위 -90..90",
-                         priority=self.priority, sensitivity=self.sensitivity)
+                         priority=self.priority, sensitivity=self.sensitivity,
+                         confirmed=hinted_only_confident)
         if abs(number) <= 180 and LON_RE.fullmatch(v) and precision >= 4:
             hinted_lon = hinted and any(h in column_name.upper() for h in ("LNG", "LON", "경도"))
+            confidence = 0.95 if hinted_lon else 0.6
             return Match("LONGITUDE" if hinted_lon else self.type_key,
                          "경도" if hinted_lon else "위치좌표(경도 범위)",
-                         0.95 if hinted_lon else 0.6,
+                         confidence if hinted_only_confident else 0.55,
                          evidence="경도 범위 -180..180",
-                         priority=self.priority, sensitivity=self.sensitivity)
+                         priority=self.priority, sensitivity=self.sensitivity,
+                         confirmed=hinted_only_confident)
         return None

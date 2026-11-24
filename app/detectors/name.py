@@ -53,4 +53,5 @@ class NameDetector(Detector):
         if LATIN_NAME.match(v):
             return Match(self.type_key, self.display_name, 0.8,
                         evidence="이름+성 형식", priority=self.priority, sensitivity=self.sensitivity)
+
         return None

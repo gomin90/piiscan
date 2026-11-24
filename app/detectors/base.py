@@ -66,7 +66,7 @@ class ValueProfile:
         tags: set[str] = set()
         if digits == self.length:
             tags.add("digits")
-        elif digits and digits / self.length >= 0.5 and set(v) <= set("0123456789- /.:"):
+        elif digits and digits / self.length >= 0.5 and set(v) <= set("0123456789- /.:+"):
             tags.add("digits_sep")
         if "@" in v:
             tags.add("email")
@@ -175,6 +175,50 @@ class Detector:
 
     def name_excludes(self, column_name: str) -> bool:
         return any(hint.upper() in column_name.upper() for hint in self.negative_hints)
+
+    #: Column names that say "this column holds identifiers", not people.
+    IDENTIFIER_TOKENS = ("CODE", "REF", "SEQ", "INTERNAL", "SYS", "SKU", "ORDER",
+                         "TRACK", "BATCH", "INSTANCE", "TOKEN")
+    #: Column names that explain a bare digit run as a device or network
+    #: identifier (IMEI/IMSI/MAC/UUID), so a card · account · postcode shape is
+    #: not enough evidence on its own.
+    DEVICE_TOKENS = ("IMEI", "IMSI", "DEVICE", "TERMINAL", "SUBSCRIBER", "MAC", "UUID")
+
+    def identifier_column(self, column_name: str) -> bool:
+        name = (column_name or "").upper()
+        return self.name_excludes(name) or any(token in name for token in self.IDENTIFIER_TOKENS)
+
+    def device_identifier_column(self, column_name: str) -> bool:
+        return any(token in (column_name or "").upper() for token in self.DEVICE_TOKENS)
+
+    def contextual_match(self, match: Match, column_name: str, value: str = "") -> Match:
+        """Adjust a format match using the column it came from.
+
+        A 15-digit string is an IMEI only if nothing else explains it. When the
+        column is named like a system identifier (CODE / REF / ORDER / SEQ) and
+        carries no hint of this privacy type, a bare run of digits is not enough
+        evidence to confirm personal data, so the match is downgraded to
+        "needs review" instead of being silently accepted.
+
+        Values with internal structure (segments, separators, hyphen-separated
+        account layouts) keep their verdict: that shape is not what an arbitrary
+        internal code looks like.
+        """
+        if match is None or not match.confirmed:
+            return match
+        fragment = (match.fragment or "").strip() or (value or "").strip()
+        #: A bare run of digits, or a digit template such as "59************1", has
+        #: no structure that distinguishes it from an internal identifier. Values
+        #: with real segments ("1234-567890123") keep their verdict.
+        if not re.fullmatch(r"[0-9]+|[0-9*＊]{6,}", fragment):
+            return match
+        affinity = self.column_affinity(column_name)
+        if ((self.identifier_column(column_name) or self.device_identifier_column(column_name))
+                and affinity == 0.0):
+            match.confidence = max(0.1, match.confidence - 0.30)
+            match.confirmed = False
+            match.evidence += f" (컬럼 {column_name}은 식별자/코드 컬럼 - 근거 부족)"
+        return match
 
     def match(self, value: str, profile: ValueProfile, column_name: str = "") -> Match | None:
         raise NotImplementedError

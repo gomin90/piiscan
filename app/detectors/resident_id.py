@@ -6,7 +6,7 @@ import re
 from app.detectors.base import Detector, Match, ValueProfile
 from app.utils.validators import birth_part_valid, digits_only, resident_checksum
 
-FULL_RE = re.compile(r"^\d{6}-\d{6}-\d$|^\d{13}$|^\d{6}-\d{6}$")
+FULL_RE = re.compile(r"^\d{6}-\d{6}-\d$|^\d{13}$|^\d{6}-\d{6}$|^\d{6}-\d{7}$")
 MASKED_RE = re.compile(r"^\d{6}[-.][*＊Xx]{3,7}(?:[-.][*＊Xx]*\d*)?$|\d{4}[*＊]{4,8}[-.]\d{3,4}$")
 
 

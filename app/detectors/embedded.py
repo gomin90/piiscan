@@ -21,6 +21,8 @@ EMBEDDED_PHONE = re.compile(r"(?<!\d)01[0-9]-\d{3,4}-\d{4}(?!\d)")
 EMBEDDED_CARD = re.compile(r"(?<!\d)(?:\d{4}[- ]){3}\d{4}(?!\d)")
 EMBEDDED_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 EMBEDDED_PASSPORT = re.compile(r"(?<![A-Za-z0-9])[EQ][A-Z]\d{7,8}(?![A-Za-z0-9])")
+EMBEDDED_BIRTH = re.compile(r"(?<!\d)(19\d{2}|20\d{2})[-/](\d{1,2})[-/](\d{1,2})(?!\d)")
+BIRTH_CUES = ("birth", "dob", "born", "생년", "출생", "生日", "出生", "birthday", "생일")
 
 
 class EmbeddedDetector(Detector):
@@ -103,6 +105,32 @@ class EmbeddedEmailDetector(EmbeddedDetector):
         return Match(self.type_key, self.display_name, 0.9,
                      evidence="긴文本 내부 이메일 주소",
                      fragment=found.group(0), priority=self.priority, sensitivity=self.sensitivity)
+
+
+class EmbeddedBirthDateDetector(Detector):
+    """A date that is explicitly labelled as a birth date inside free text."""
+
+    type_key = "BIRTH_DATE"
+    display_name = "생년월일"
+    priority = 2
+    sensitivity = 0.7
+    candidate_tags = frozenset({"digits", "digits_sep", "separated", "long_text", "hangul", "latin"})
+    name_hints = ("BIRTH", "DOB", "생년", "출생")
+
+    def match(self, value: str, profile: ValueProfile, column_name: str = "") -> Match | None:
+        text = value or ""
+        lowered = text.lower()
+        if not any(cue in lowered for cue in BIRTH_CUES):
+            return None
+        found = EMBEDDED_BIRTH.search(text)
+        if not found:
+            return None
+        year, month, day = int(found.group(1)), int(found.group(2)), int(found.group(3))
+        if not birth_part_valid(f"{year}{month:02d}{day:02d}"):
+            return None
+        return Match(self.type_key, self.display_name, 0.85,
+                     evidence="문장 내 생년월일 표시", fragment=found.group(0),
+                     priority=self.priority, sensitivity=self.sensitivity)
 
 
 class EmbeddedPassportDetector(EmbeddedDetector):

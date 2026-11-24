@@ -24,11 +24,20 @@ $assetUrl = "https://github.com/ggml-org/llama.cpp/releases/download/$Tag/llama-
 # SHA256 of the official b12556 assets, measured on 2026-11-20
 $shaTable = @{ "13.5" = "dde6d3f922b2225574ba32fe4bad227fb4784a8a5ebabc78c69fb3da7979ae23";
                "12.4" = "e18df7a7189e1446ca338aa4f04529acb4dce7537164baed2fbc624e48864932" }
-if (-not $shaTable.ContainsKey($CudaVersion)) {
-    Write-Host "ERROR: -CudaVersion must be 12.4 or 13.5"
+# CUDA 13.3 has no official llama.cpp prebuilt asset. The CUDA 13 build is the one that
+# links against cudart64_13.dll / cublas64_13.dll and runs on a CUDA 13.3 install.
+$asset = $CudaVersion
+if ($CudaVersion -in @("13.3", "13")) {
+    Write-Host "-CudaVersion 13.3: llama.cpp publishes only 12.4 and 13.5 CUDA builds."
+    Write-Host "Using the CUDA 13.5 build (same CUDA 13 runtime ABI, sm_120 included)."
+    Write-Host "For a backend compiled against the exact 13.3 toolchain use build-cuda-133-backend.ps1."
+    $asset = "13.5"
+}
+if (-not $shaTable.ContainsKey($asset)) {
+    Write-Host "ERROR: -CudaVersion must be 12.4, 13.3 or 13.5"
     exit 1
 }
-$expectedSha = $shaTable[$CudaVersion]
+$expectedSha = $shaTable[$asset]
 $vendor = Join-Path $root "vendor\llama-windows"
 New-Item -ItemType Directory -Force -Path $vendor | Out-Null
 $zip = Join-Path $vendor "llama-$Tag-bin-win-cuda-$CudaVersion-x64.zip"

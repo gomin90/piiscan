@@ -114,6 +114,18 @@ class JevStyleEngine:
             "decisions": outcome["decisions"],
         }
 
+    def classify_metadata(self, state: dict) -> dict:
+        """Function B judgement: column meaning from metadata only, never values."""
+        if self.adapter is None:
+            return {"ok": False, "error": self.skipped_reason or "AI 미로드",
+                    "verdict": None, "relevance": 0.0, "types": [], "decision": None,
+                    "confidence": 0.0}
+        outcome = self.adapter.classify_metadata(state)
+        self.decisions = self.adapter.decisions
+        self.failures = self.adapter.failures
+        self.inference_seconds = self.adapter.inference_seconds
+        return outcome
+
     def judge_code_group(self, group: dict) -> dict | None:
         if self.adapter is None:
             return None
@@ -150,6 +162,20 @@ class JevStyleEngine:
         self.failures = self.adapter.failures
         self.inference_seconds = self.adapter.inference_seconds
         return outcome
+
+    def judge_cells(self, column: dict, cells: list[dict]) -> list[dict]:
+        """Batch Cell-level judgement: one scorer request per column batch.
+
+        Returns one verdict per cell. Cells the model could not decide keep an
+        explicit error so they are reported as 미평가 rather than 비개인정보.
+        """
+        if self.adapter is None:
+            return []
+        outcomes = self.adapter.classify_cells(column, cells)
+        self.decisions = self.adapter.decisions
+        self.failures = self.adapter.failures
+        self.inference_seconds = self.adapter.inference_seconds
+        return outcomes
 
     def close(self) -> None:
         if self.adapter is not None:

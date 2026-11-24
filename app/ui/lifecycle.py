@@ -12,9 +12,56 @@ Measured on macOS 27.3 / Python 3.15.2 / PySide6 6.12 (offscreen):
 """
 from __future__ import annotations
 
+import atexit
 from typing import Iterable
 
+from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QApplication, QWidget
+
+# Every worker QThread the app started. The references are strong on purpose: a
+# QThread whose object is garbage-collected while its thread still runs aborts
+# the process ("QThread: Destroyed while thread is still running"). Shutdown
+# joins each thread and then releases the reference.
+_live_threads: list[QThread] = []
+
+
+def register_thread(thread: QThread) -> None:
+    """Track a worker thread so teardown can always join it."""
+    if thread not in _live_threads:
+        _live_threads.append(thread)
+
+
+def unregister_thread(thread: QThread) -> None:
+    """Drop a thread from the shutdown list once it has actually finished."""
+    if thread in _live_threads:
+        _live_threads.remove(thread)
+
+
+def live_threads() -> list[QThread]:
+    return [thread for thread in _live_threads if thread.isRunning()]
+
+
+def join_threads(timeout_ms: int = 30_000) -> dict:
+    """Cancel and join every worker thread before Qt destroys it.
+
+    Returns ``{"joined": n, "still_running": n}``; a worker that refuses to stop
+    is reported rather than silently left running.
+    """
+    result = {"joined": 0, "still_running": 0}
+    for thread in list(_live_threads):
+        request_cancel = getattr(thread, "request_cancel", None)
+        if callable(request_cancel):
+            request_cancel()
+        if thread.isRunning():
+            thread.wait(timeout_ms)
+        result["still_running" if thread.isRunning() else "joined"] += 1
+    _live_threads.clear()
+    return result
+
+
+# Registered after QtCore, so it runs before PySide's own `destroyQCoreApplication`
+# atexit handler (atexit runs in LIFO order).
+atexit.register(join_threads)
 
 
 def close_widgets(*widgets: object) -> None:

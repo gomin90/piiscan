@@ -123,6 +123,35 @@ def test_cuda_status_reports_arch_mismatch_for_blackwell(tmp_path: Path):
     assert "sm_90" in status["reason"]
 
 
+def test_cuda_runtime_dlls_are_found_in_the_13_x_bin_x64_layout(tmp_path: Path, monkeypatch):
+    """CUDA 13.x installs its runtime DLLs in bin\\x64, not bin."""
+    from app.ai.gpu_detector import _cuda_dll_search_dirs, cuda_backend_status
+
+    toolkit = tmp_path / "cuda-v13.3"
+    (toolkit / "bin" / "x64").mkdir(parents=True)
+    (toolkit / "bin" / "x64" / "cublas64_13.dll").write_bytes(b"x")
+    (toolkit / "bin" / "x64" / "cublasLt64_13.dll").write_bytes(b"x")
+    monkeypatch.setenv("CUDA_PATH", str(toolkit))
+
+    dirs = _cuda_dll_search_dirs(None)
+    assert toolkit / "bin" / "x64" in dirs
+
+    backend = tmp_path / "ggml-cuda.dll"
+    backend.write_bytes(b"cublas64_13.dll cublasLt64_13.dll sm_86 sm_89 sm_103 sm_120 sm_121")
+    status = cuda_backend_status(tmp_path)
+    assert status["missing"] == [], status["missing"]
+    assert "120" in status["archs"]  # archs are stored as bare numbers
+
+    # CUDA 12.4 toolkits still work through the plain bin layout.
+    old_toolkit = tmp_path / "cuda-v12.4"
+    (old_toolkit / "bin").mkdir(parents=True)
+    (old_toolkit / "bin" / "cublas64_12.dll").write_bytes(b"x")
+    monkeypatch.setenv("CUDA_PATH", str(old_toolkit))
+    backend12 = tmp_path / "ggml-cuda-12.dll"
+    backend12.write_bytes(b"cublas64_12.dll cublasLt64_12.dll sm_50 sm_90")
+    assert cuda_backend_status(tmp_path)["missing"]  # the 12.4 DLLs are in a different dir
+
+
 def test_gpu_plan_refuses_cuda_when_backend_is_unusable(tmp_path: Path):
     from app.ai.gpu_detector import gpu_plan
 

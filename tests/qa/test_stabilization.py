@@ -164,6 +164,24 @@ def test_three_files_same_row_numbers_share_one_store(tmp_path: Path) -> None:
     store.close()
 
 
+def test_reanalysing_a_file_replaces_its_own_records(tmp_path: Path) -> None:
+    """The same file analysed twice into one shared store must not collide."""
+    shared = tmp_path / "shared.sqlite"
+    write_csv(tmp_path, "again.csv", "name,phone\nkim,010-1234-5678\nlee,010-2222-3333\n")
+    config = AnalysisConfig(use_ai=False, detail_store_path=str(shared))
+    first = analyse_file(tmp_path / "again.csv", config)
+    second = analyse_file(tmp_path / "again.csv", config)
+    assert first.cell_counts["detail_rows_stored"] == 2
+    assert second.cell_counts["detail_rows_stored"] == 2
+    store = DetailStore(shared, "audit")
+    total = store.conn.execute("SELECT COUNT(*) FROM row_detail").fetchone()[0]
+    cells = store.conn.execute("SELECT COUNT(*) FROM cell_detail").fetchone()[0]
+    store.close()
+    assert total == 2, f"row records accumulated across runs: {total}"
+    assert cells == 2, f"cell records accumulated across runs: {cells}"
+    assert list(iter_hit_cells([second])) and len(list(iter_row_records([second]))) == 2
+
+
 def test_shared_store_export_contains_only_own_file(tmp_path: Path) -> None:
     shared = tmp_path / "shared.sqlite"
     write_csv(tmp_path, "a.csv", "id,phone\n1,010-1234-5678\n2,010-2222-3333\n")
@@ -275,20 +293,20 @@ def test_gui_cell_detail_is_capped_and_paged(tmp_path: Path) -> None:
     assert result.cell_counts["detail_cells_stored"] == columns
     window = ResultWindow(config)
     window.show_rows([result])
-    assert window.row_table.rowCount() == 1
+    assert window.row_model.rowCount() == 1
     window.select_row(window._row_page[0])
     assert window._cell_total() == columns
-    assert window.hit_table.rowCount() == page, "the first render is capped at one cell page"
+    assert window.hit_model.rowCount() == page, "the first render is capped at one cell page"
     for expected_page in range(1, 4):
         window._change_cell_page(1)
         expected = page if expected_page < 3 else columns - 3 * page
-        assert window.hit_table.rowCount() == expected
+        assert window.hit_model.rowCount() == expected
         assert window._cell_page == expected_page
     window._change_cell_page(5)  # clamped to the last page
     assert window._cell_page == 3
-    assert window.next_cell_page.isEnabled() is False
+    assert window.next_hit_page.isEnabled() is False
     window._change_cell_page(-1)
-    assert window.prev_cell_page.isEnabled() is True
+    assert window.prev_hit_page.isEnabled() is True
 
 
 # ---------------------------------------------------------------- CSV large fields

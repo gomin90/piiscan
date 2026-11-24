@@ -14,15 +14,26 @@ REGION_ONLY = {
     "제주특별자치도", "시", "군", "구",
 }
 
-ROAD_RE = re.compile(r"(road|로|길|거리|street|st|ave|avenue|blvd|rd)", re.IGNORECASE)
+# Latin road words must be whole words: "ORD42" contains the letters "rd" but is
+# not a road, and reading it as one turns every order code into an address.
+ROAD_RE = re.compile(r"\b(?:road|street|st|ave|avenue|blvd|rd)\b|로|길|거리", re.IGNORECASE)
 DETAIL_RE = re.compile(
-    r"(\d{1,4})\s*[-–]\s*\d{1,4}"          # 12-34 style road number
+    # 12-34 style road number. The lookahead keeps phone-like chains
+    # ("010-1234-5678") out: a road number is never followed by another segment.
+    r"(?<![-\d])\d{1,4}\s*[-–]\s*\d{1,4}(?![-\d])"
     r"|\d{1,4}\s*(층|호|동|室|層)"          # floor / room / building
     r"|아파트|公寓|빌딩|빌라|building|大厦|号楼"
     r"|(apt|unit|suite|flat|#)\s*[-\d]+"
-    r"|(road|로|길|거리|street|st|ave|avenue|blvd|rd)\s+\d{1,5}",
+    r"|(?:\b(?:road|street|st|ave|avenue|blvd|rd)\b|로|길|거리)\s+\d{1,5}",
     re.IGNORECASE,
 )
+# Number-before-street form ("123 Main St") and romanised Korean roads ("Sequoia-ro 54"),
+# which the trailing-number pattern above does not cover.
+PRE_POSITION_RE = re.compile(
+    r"(?<![-\w])\d{1,5}\s+[A-Za-z]{2,20}\s+(?:St|Street|Ave|Avenue|Rd|Road|Blvd)\b",
+    re.IGNORECASE,
+)
+ROMANISED_ROAD_RE = re.compile(r"[A-Za-z]{3,20}-(?:ro|il)\s+\d{1,5}", re.IGNORECASE)
 BUILDING_RE = re.compile(r"아파트|公寓|빌딩|빌라|building|大厦|号楼|apt|unit|suite|flat", re.IGNORECASE)
 
 
@@ -31,8 +42,11 @@ class AddressDetector(Detector):
     display_name = "상세주소"
     priority = 1
     sensitivity = 0.75
-    candidate_tags = frozenset({"hangul", "latin"})
+    candidate_tags = frozenset({"hangul", "latin", "alnum", "long_text"})
     name_hints = ("ADDR", "ADDRESS", "주소", "STREET", "LOCATION")
+    # A column of IDs/refs is not an address column even when a value contains
+    # "<number> <word> Street".
+    negative_hints = ("ORDER", "REF", "CODE", "ID", "NO", "번호", "코드")
 
     def match(self, value: str, profile: ValueProfile, column_name: str = "") -> Match | None:
         v = value.strip()
@@ -45,10 +59,11 @@ class AddressDetector(Detector):
             return None
         if "uuid" in profile.tags or "mac" in profile.tags or ("hex" in profile.tags and profile.length >= 16):
             return None
-        if not DETAIL_RE.search(v):
+        if not (DETAIL_RE.search(v) or PRE_POSITION_RE.search(v) or ROMANISED_ROAD_RE.search(v)):
             return None
         # A number is only an address detail when it sits next to a road or building.
-        if not (ROAD_RE.search(v) or BUILDING_RE.search(v)):
+        if not (ROAD_RE.search(v) or BUILDING_RE.search(v)
+                or PRE_POSITION_RE.search(v) or ROMANISED_ROAD_RE.search(v)):
             return None
         confidence = 0.9 if (ROAD_RE.search(v) and profile.hangul) else 0.72
         return Match(self.type_key, self.display_name, confidence,

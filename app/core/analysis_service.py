@@ -17,7 +17,11 @@ from app.utils.hyperloglog import BoundedSet
 from app.core.csv_detector import detect_format, read_preview
 from app.core.csv_loader import CsvLoader, FileSettings, file_size
 from app.core.encryption_analyzer import analyze_protection
+from app.core.cell_verdict import (
+    STATUSES, STATUS_EMPTY, STATUS_NON, STATUS_PII, STATUS_REVIEW, STATUS_UNRATED,
+)
 from app.core.detail_store import DetailStore
+from app.core import temp_store
 from app.core.privacy_engine import PrivacyEngine
 from app.core.result_aggregator import build_results
 from app.utils.logger import Diagnostics, get_logger
@@ -39,6 +43,7 @@ class FileResult:
     rows_unparsed: int = 0
     oversized_fields: int = 0
     field_char_limit: int = 0
+    cancelled: bool = False
     parse_errors: list = field(default_factory=list)
     findings: list = field(default_factory=list)
     row_records: list = field(default_factory=list)
@@ -52,6 +57,7 @@ class FileResult:
     analysis_id: str = ""
     preview: list = field(default_factory=list)
     timings: dict = field(default_factory=dict)
+    resumed_from: int = 0
 
     def as_dict(self) -> dict:
         return {
@@ -70,6 +76,8 @@ class FileResult:
             "parse_errors": self.parse_errors,
             "total_rows": self.total_rows,
             "elapsed_seconds": round(self.elapsed_seconds, 3),
+            "cancelled": self.cancelled,
+            "resumed_from_row": self.resumed_from,
             "findings": self.findings,
             "row_analysis": {
                 "rows_inspected": self.cell_counts.get("rows_inspected", 0),
@@ -82,12 +90,30 @@ class FileResult:
                 "detail_cache_cells": self.cell_counts.get("detail_cache_cells", 0),
                 "detail_cache_cell_limit": self.cell_counts.get("detail_cache_cell_limit", 0),
                 "detail_store_path": self.cell_counts.get("detail_store_path", ""),
+                "cell_records_stored": self.cell_counts.get("verdict_cells", 0),
+                "cell_status_counts": self.cell_counts.get("verdict_status", {}),
                 # The JSON only carries the in-memory cache; the complete detail
                 # is in the SQLite store and in the CSV exports.
                 "detail_rows_in_json": len(self.row_records),
                 "details_complete": self.cell_counts.get("detail_rows_stored", 0) == len(self.row_records),
                 "details_truncated": self.cell_counts.get("detail_rows_stored", 0) > len(self.row_records),
                 "rows": [record.as_dict() for record in self.row_records],
+            },
+            "cell_analysis": {
+                "logical_cells": self.cell_counts.get("logical_cells", 0),
+                "key_excluded_cells": self.cell_counts.get("key_cells", 0),
+                "verdict_complete": self.cell_counts.get("verdict_complete", True),
+                "cells_inspected": self.cell_counts.get("cells_inspected", 0),
+                "cells_empty": self.cell_counts.get("empty_cells", 0),
+                "cells_rule_cleared": self.cell_counts.get("cleared_cells", 0),
+                "cells_unrated": self.cell_counts.get("unrated_cells", 0),
+                "cell_hits": self.cell_counts.get("cell_hits", 0),
+                "cell_pii": self.cell_counts.get("pii_cells", 0),
+                "cell_review": self.cell_counts.get("review_cells", 0),
+                "cell_ignored": self.cell_counts.get("ignored_cells", 0),
+                "cell_records_stored": self.cell_counts.get("verdict_cells", 0),
+                "cell_status_counts": self.cell_counts.get("verdict_status", {}),
+                "rows_with_pii": self.cell_counts.get("rows_with_hits", 0),
             },
             "protection": [g.as_dict() for g in self.protection],
             "code_groups": [g.as_dict() for g in self.code_groups],
@@ -102,6 +128,47 @@ class FileResult:
 SETTLED_RULE_CONFIDENCE = 0.85
 # How many cells of a row the AI is shown at most.
 CONFIG_ROW_CONTEXT_LIMIT = 12
+# Cells the AI is asked about when the rules could not decide.
+AI_PENDING_STATUSES = (STATUS_UNRATED, STATUS_REVIEW)
+# The Jev-Style readout has three options, so a bare plurality (p ~ 0.34) is not
+# evidence. Below this probability the model's "personal" answer only warrants a
+# human review, never a confirmed hit.
+AI_CONFIRM_CONFIDENCE = 0.60
+
+
+def merge_cell_verdict(rule_status: str, rule_confidence: float,
+                       ai_decision: str | None, ai_confidence: float) -> tuple[str, float, str, bool]:
+    """Combine the rule verdict and the model verdict for one cell.
+
+    Rules and AI are complementary: the model can promote an undecided cell, but
+    it can never erase a rule-confirmed personal-data verdict by itself - that
+    case is flagged for human review instead.
+    """
+    if ai_decision is None:
+        return rule_status, rule_confidence, "규칙", True
+    if ai_decision == "PERSONAL_DATA":
+        if rule_status == STATUS_PII:
+            return STATUS_PII, max(rule_confidence, ai_confidence), "규칙+AI", False
+        if ai_confidence < AI_CONFIRM_CONFIDENCE:
+            # The model leans personal but is not sure: never confirm on a
+            # plurality vote, and never lose the possibility either.
+            return STATUS_REVIEW, ai_confidence, "AI", True
+        if rule_status in AI_PENDING_STATUSES:
+            return STATUS_PII, ai_confidence, "AI", rule_status == STATUS_REVIEW
+        # A rule that positively cleared the cell and the model that says it is
+        # personal data disagree: keep the cell under review.
+        return STATUS_REVIEW, min(rule_confidence, ai_confidence), "규칙+AI", True
+    if ai_decision == "NON_PERSONAL_DATA":
+        if rule_status == STATUS_PII:
+            # The model may not overwrite a confirmed hit on its own.
+            return STATUS_PII, rule_confidence, "규칙", True
+        if rule_status == STATUS_NON:
+            return STATUS_NON, max(rule_confidence, ai_confidence), "규칙+AI", False
+        if rule_status == STATUS_UNRATED:
+            return STATUS_NON, ai_confidence, "AI", False
+        return STATUS_REVIEW, rule_confidence, "규칙", True
+    return STATUS_REVIEW, min(rule_confidence, 0.5), "규칙+AI", True
+
 
 
 def ai_column_candidates(findings: list[dict], config: AnalysisConfig) -> list[dict]:
@@ -218,6 +285,102 @@ def row_context(raw: dict, store, settings: FileSettings) -> dict:
     }
 
 
+def review_cells(store: DetailStore, llm, columns: list[dict], config: AnalysisConfig,
+                 audit: dict, diagnostics: Diagnostics, report_ai: callable = None) -> None:
+    """Ask the local model about the cells the rules could not settle.
+
+    Questions are batched per column (Jev-Style shares one decision state per
+    request), so a batch of 25 cells costs one scorer call, not 25. Only the
+    masked value and the rule evidence are sent; raw cell text never leaves the
+    rule engine. Cells the model is not asked about keep their 미평가 status.
+    """
+    cell_audit = {"policy": config.ai_cell_reviews, "limit": config.max_ai_cell_reviews,
+                  "candidates": 0, "attempted": 0, "success": 0, "failed": 0,
+                  "skipped": 0, "batches": 0, "reused": 0, "seconds": 0.0}
+    if config.ai_cell_reviews == "none" or config.max_ai_cell_reviews <= 0:
+        cell_audit["skipped"] = store.verdict_count() - store.verdict_count(STATUS_EMPTY)
+        audit["cell"] = cell_audit
+        diagnostics.record("ai_cell_review", **cell_audit)
+        return
+    if llm is None or not hasattr(llm, "judge_cells"):
+        cell_audit["skipped"] = store.verdict_count() - store.verdict_count(STATUS_EMPTY)
+        cell_audit["failed"] = cell_audit["skipped"]
+        audit["cell"] = cell_audit
+        diagnostics.record("ai_cell_review", **cell_audit)
+        return
+
+    statuses = STATUSES if config.ai_cell_reviews == "all" else AI_PENDING_STATUSES
+    statuses = tuple(status for status in statuses if status != STATUS_EMPTY)
+    cell_audit["candidates"] = store.candidate_count(statuses)
+    column_by_index = {column["index"]: column for column in columns}
+    started = time.perf_counter()
+    batch: list[dict] = []
+    batch_column: int | None = None
+    # A verdict judged for one cell is reusable for another cell only when the
+    # value AND the column context are the same; different columns never share a
+    # verdict even when the value is identical.
+    reuse: dict[tuple[int, str, str], tuple[str, float, str, bool]] = {}
+
+    def flush() -> None:
+        nonlocal batch, batch_column
+        if not batch:
+            return
+        column = column_by_index.get(batch_column, {"column": batch[0]["column"], "index": batch_column})
+        cell_audit["attempted"] += len(batch)
+        cell_audit["batches"] += 1
+        try:
+            results = llm.judge_cells(column, batch)
+        except Exception as exc:  # a scorer failure must not lose the rule verdict
+            logger.warning("Cell AI 판단 실패: %s", exc)
+            cell_audit["failed"] += len(batch)
+            batch = []
+            return
+        updates = []
+        for cell, result in zip(batch, results):
+            if result.get("decision") is None:
+                cell_audit["failed"] += 1
+                continue
+            cell_audit["success"] += 1
+            status, confidence, method, needs_review = merge_cell_verdict(
+                cell["cell_status"], cell["confidence"], result["decision"], result["confidence"]
+            )
+            updates.append((result["decision"], status, confidence, method, needs_review,
+                            cell["row"], cell["column_index"]))
+            reuse[(cell["column_index"], cell["masked_value"], cell["rule_verdict"])] = (
+                status, confidence, method, needs_review)
+        if updates:
+            store.set_cell_ai_verdicts(updates)
+        batch = []
+        if report_ai is not None:
+            report_ai(cell_audit["attempted"])
+
+    for cell in store.iter_candidates(statuses, config.max_ai_cell_reviews):
+        key = (cell["column_index"], cell["masked_value"], cell["rule_verdict"])
+        cached = reuse.get(key)
+        if cached is not None:
+            status, confidence, method, needs_review = cached
+            store.set_cell_ai_verdicts([(cell["ai_verdict"] or status, status, confidence,
+                                         method, needs_review, cell["row"], cell["column_index"])])
+            cell_audit["reused"] += 1
+            continue
+        if batch_column is not None and (cell["column_index"] != batch_column
+                                         or len(batch) >= config.ai_cell_batch_size):
+            flush()
+        batch_column = cell["column_index"]
+        batch.append(cell)
+        if llm.memory_usage().get("rss_mb", 0) > 3500:
+            logger.warning("RAM 한계 감지 -> Cell AI 추론 중단, 규칙 기반 결과 보존")
+            batch = []
+            break
+    flush()
+
+    cell_audit["skipped"] = max(0, cell_audit["candidates"] - cell_audit["attempted"])
+    cell_audit["seconds"] = round(time.perf_counter() - started, 3)
+    store.write_row_verdicts()  # row summary must reflect the merged cell verdicts
+    audit["cell"] = cell_audit
+    diagnostics.record("ai_cell_review", **cell_audit)
+
+
 def detect_analysis_mode(total_rows: int, requested: str, sample_rows: int = 1000) -> str:
     if requested == "full":
         return "전수"
@@ -235,6 +398,7 @@ def analyse_file(
     progress: callable = None,
     diagnostics: Diagnostics | None = None,
     overrides: dict | None = None,
+    should_stop: callable = None,
 ) -> FileResult:
     config = config or AnalysisConfig()
     logger = get_logger()
@@ -267,15 +431,40 @@ def analyse_file(
     if config.detail_store_path:
         detail_path = Path(config.detail_store_path)
     else:
+        # Temporary stores are tracked by app.core.temp_store so they are always
+        # removed, even on cancellation, an exception, or a SIGTERM.
+        temp_store.sweep_orphans()
         temp_dir = Path(tempfile.mkdtemp(prefix="piiscan-detail-"))
         detail_path = temp_dir / "detail.sqlite"
     analysis_id = f"{Path(path).stem}-{hashlib.sha1(str(Path(path).resolve()).encode()).hexdigest()[:10]}"
-    store = DetailStore(detail_path, analysis_id)
+    store = DetailStore(detail_path, analysis_id, kind=config.analysis_kind,
+                      resume=bool(config.resume))
     store.temp_dir = temp_dir
+    temp_store.register_store(store)
+    # `--resume` continues a cancelled run of the same file. The checkpoint is
+    # read before registration so it is not overwritten by it.
+    resume_from = store.resume_row() if config.resume else 0
+    store.register_run(path, settings.schema, settings.table, settings.db_type,
+                       resume=bool(resume_from))
+    if resume_from:
+        diagnostics.record("resume_checkpoint", resumed_from_row=resume_from)
     engine = PrivacyEngine(config, store)
+    # KEY columns are chosen by the user, never guessed: an unmatched name is
+    # reported as ignored instead of silently narrowing the scan.
+    wanted = {name.strip().lower() for name in config.key_columns if name.strip()}
+    engine.key_indexes = {index for index, name in enumerate(loader.column_names)
+                          if name.strip().lower() in wanted}
+    unmatched_keys = wanted - {name.strip().lower() for name in loader.column_names}
+    if unmatched_keys:
+        diagnostics.record("key_columns_ignored", columns=sorted(unmatched_keys),
+                           available=loader.column_names[:20])
+    diagnostics.record("key_columns", selected=[name for index, name in enumerate(loader.column_names)
+                                                if index in engine.key_indexes],
+                       key_cells_expected=(loader.total_rows or 0) * len(engine.key_indexes))
     # The declared header width, not the widest row seen so far, is what makes a
     # field "extra".
     engine.header_count = loader.header_length or len(loader.column_names)
+    engine.row_offset = resume_from
     column_count = max(1, len(loader.column_names))
     # Distinct-value memory scales with the number of columns, so the per-column
     # exact set is sized from the file-wide budget (max_distinct_tracked) while
@@ -287,7 +476,10 @@ def analyse_file(
              for i, name in enumerate(loader.column_names)]
     diagnostics.record("memory_budget", columns=column_count,
                        distinct_per_column=distinct_per_column, hll_precision=hll_precision)
+    if resume_from:
+        diagnostics.record("resume_stats_seeded", **store.seed_column_stats(stats))
     batch: list[list[str]] = []
+    cancelled = False
     code_sample: list[list[str]] = []
     last_progress_rows = 0
     last_progress_cells = 0
@@ -310,9 +502,19 @@ def analyse_file(
             last_progress_cells = engine.cells_inspected
             progress(loader.parsed_rows, loader.progress_total(), engine.cells_inspected)
     for index, row in loader.iter_rows():
+        # `loader` numbers rows from 0 while the ledger numbers them from 1, so a
+        # checkpoint of 40 means rows 1..40 are already decided.
+        if resume_from and index < resume_from:
+            continue
         if row_limit is not None and engine.rows_analysed >= row_limit:
             diagnostics.record("sampling_cutoff", rows_analysed=engine.rows_analysed,
                                total_rows=loader.total_rows)
+            break
+        if should_stop is not None and should_stop():
+            diagnostics.record("analysis_cancelled", rows_analysed=engine.rows_analysed,
+                               cells_inspected=engine.cells_inspected,
+                               total_rows=loader.total_rows)
+            cancelled = True
             break
         batch.append(row)
         if len(code_sample) < 500:
@@ -322,17 +524,26 @@ def analyse_file(
             engine.process_batch(stats, batch)
             batch_seconds += time.perf_counter() - t0
             batch = []
+            store.register_columns([column.name for column in stats])
+            store.mark_last_row(resume_from + engine.rows_analysed)
             report_progress()
 
     if batch:
         t0 = time.perf_counter()
         engine.process_batch(stats, batch)
         batch_seconds += time.perf_counter() - t0
+        store.register_columns([column.name for column in stats])
+        store.mark_last_row(resume_from + engine.rows_analysed)
         report_progress()
 
     findings = engine.finalise(stats)
     row_records = engine.finalise_verdicts(stats)
     cell_counts = engine.cell_counts()
+    completeness = store.verify_completeness()
+    diagnostics.record("cell_completeness", **completeness)
+    if not completeness["complete"]:
+        logger.error("Cell ledger incomplete: %d logical cells, %d verdicts",
+                     completeness["logical_cells"], completeness["verdict_cells"])
     diagnostics.record("rows_parsed", parsed=loader.parsed_rows, errors=loader.error_rows,
                        unparsed=loader.unparsed_rows, empty=loader.empty_rows,
                        irregular=loader.irregular_rows, short=loader.short_rows,
@@ -376,6 +587,13 @@ def analyse_file(
             if len(candidates) > len(selected):
                 diagnostics.record("ai_column_cap", limit=config.max_ai_column_reviews,
                                    candidates=len(candidates), selected=len(selected))
+        # Cell-level semantic judgement: the rules inspected every cell, the model
+        # is asked only about the cells the rules could not settle.
+        def ai_progress(ai_cells: int) -> None:
+            if progress is not None:
+                progress(loader.parsed_rows, loader.progress_total(), engine.cells_inspected, ai_cells)
+
+        review_cells(store, llm, findings, config, ai_audit, diagnostics, report_ai=ai_progress)
         # Row 문맥 판정은 규칙이 결론 내리지 못한 Row에만, 제한된 횟수만큼 호출된다.
         # 후보는 detail cache가 아니라 전체 store에서 뽑는다: cap 때문에 AI이 파일
         # 앞부분 Row만 보는 편향을 막는다.
@@ -455,4 +673,6 @@ def analyse_file(
         analysis_id=analysis_id,
         preview=read_preview(path, settings.encoding, settings.delimiter, 20),
         timings={"rules": round(engine.elapsed_rules, 3), "batch": round(batch_seconds, 3)},
+        cancelled=cancelled,
+        resumed_from=resume_from,
     )

@@ -20,6 +20,12 @@ from pathlib import Path
 from typing import Callable
 
 from app.config.settings import AnalysisConfig
+from app.core import temp_store
+from app.core.cell_verdict import (
+    STATUS_EMPTY, STATUS_KEY, STATUS_NON, STATUS_PII, STATUS_REVIEW, STATUS_UNRATED,
+    STATUS_RANK,
+    rule_negative_verdict,
+)
 from app.core.column_stats import ColumnStats
 from app.core.detail_store import DetailStore
 from app.core.row_analysis import (
@@ -31,6 +37,7 @@ from app.core.row_analysis import (
 )
 from app.detectors.address import AddressDetector
 from app.detectors.embedded import (
+    EmbeddedBirthDateDetector,
     EmbeddedCardDetector,
     EmbeddedEmailDetector,
     EmbeddedPassportDetector,
@@ -44,6 +51,7 @@ from app.detectors.credit_card import CreditCardDetector
 from app.detectors.custom_identifier import CustomIdentifierDetector
 from app.detectors.driver_license import DriverLicenseDetector
 from app.detectors.email import EmailDetector
+from app.detectors.free_text_name import FreeTextNameDetector
 from app.detectors.fingerprint import FingerprintDetector, IrisDetector
 from app.detectors.foreigner_id import ForeignerIdDetector
 from app.detectors.imei import ImeiDetector
@@ -119,6 +127,9 @@ def build_detectors(config: AnalysisConfig | None = None) -> list[Detector]:
         EmbeddedCardDetector(),
         EmbeddedEmailDetector(),
         EmbeddedPassportDetector(),
+        EmbeddedBirthDateDetector(),
+        # Person names that appear inside sentences rather than as a bare value.
+        FreeTextNameDetector(),
     ]
     return detectors
 
@@ -128,6 +139,8 @@ class PrivacyEngine:
         self.config = config or AnalysisConfig()
         self.detectors = build_detectors(self.config)
         self.tag_detectors: dict[str, list[Detector]] = {}
+        # Columns the user designated as record keys; their cells are never scanned.
+        self.key_indexes: set[int] = set()
         for detector in self.detectors:
             for tag in detector.candidate_tags:
                 self.tag_detectors.setdefault(tag, []).append(detector)
@@ -138,11 +151,17 @@ class PrivacyEngine:
             self.by_type.setdefault(detector.type_key, detector)
         self.elapsed_rules = 0.0
         self.rows_analysed = 0
+        # Rows already decided by a previous, cancelled run of the same file.
+        self.row_offset = 0
         self.store = store or DetailStore(Path(tempfile.mkdtemp(prefix="piiscan-detail-")) / "detail.sqlite")
+        if store is None:
+            self.store.temp_dir = self.store.path.parent
+            temp_store.register_store(self.store)
         # Raw scan counters - always exact, no detail cap applies to them.
         self.rows_inspected = 0
         self.cells_inspected = 0
         self.empty_cells = 0
+        self.key_cells = 0
         self.extra_cells = 0
         self.extra_columns = 0
         self.header_count = 0
@@ -153,6 +172,9 @@ class PrivacyEngine:
         self.pii_cells = 0
         self.review_cells = 0
         self.ignored_cells = 0
+        # Cells the rules positively cleared, and cells they left undecided.
+        self.cleared_cells = 0
+        self.unrated_cells = 0
         # Bounded in-memory view of the verdicts for the GUI overview.
         self.row_verdicts: dict[int, RowRecord] = {}
         self.cached_cells = 0
@@ -178,14 +200,24 @@ class PrivacyEngine:
         return result
 
     def process_batch(self, stats: list[ColumnStats], rows: list[list[str]]) -> None:
-        """Scan every cell of every row.
+        """Scan every cell of every row and record one verdict per cell.
+
+        Cells of a user-selected KEY column are excluded from the privacy scan but
+        still get a verdict (`KEY 제외`), so the Cell ledger stays complete and the
+        KEY columns are visible in the report as excluded rather than missing.
 
         A row with more fields than the header keeps its extra fields: they become
         EXTRA_COL_n columns and are scanned like any other cell, so personal data
         that happens to sit past the declared header is never silently dropped.
+
+        A verdict is written for *every* cell, not only for cells that matched a
+        rule. A cell that matched is left unsettled until the column is complete
+        (see `finalise_verdicts`); a cell that matched nothing is either positively
+        cleared by the non-personal rules or, when the rules cannot decide, marked
+        ``미평가`` so the model - or a reviewer - can still settle it.
         """
         started = time.perf_counter()
-        first_row = self.rows_analysed + 1
+        first_row = self.row_offset + self.rows_analysed + 1
         for offset, row in enumerate(rows, start=first_row):
             self.rows_inspected += 1
             width = len(row)
@@ -198,29 +230,84 @@ class PrivacyEngine:
                 for index in range(len(stats), width):
                     stats.append(ColumnStats(name=f"EXTRA_COL_{index + 1}", index=index,
                                             max_hit_rows=self.config.max_hit_rows))
-                self.extra_columns = max(self.extra_columns, extra)
+                # Distinct extra columns ever seen, not the widest row.
+                self.extra_columns = max(self.extra_columns, len(stats) - self.header_count)
+            key_values: list[str] = []
             for index, value in enumerate(row):
                 column = stats[index]
+                if index in self.key_indexes:
+                    # KEY columns identify the record; they are never judged as
+                    # personal data, but the record still needs its fingerprint.
+                    text = value.strip()
+                    if text and text not in NULL_TOKENS:
+                        key_values.append(value)
+                    self.key_cells += 1
+                    self.store.add_cell_verdict(offset, index, column.name, STATUS_KEY,
+                                               rule_verdict="KEY 컬럼(분석 제외)",
+                                               decision_method="KEY")
+                    continue
                 profile = profile_of(value)
                 column.record(value, profile)
                 self.cells_inspected += 1
                 if "empty" in profile.tags:
                     self.empty_cells += 1
+                    self.store.add_cell_verdict(offset, index, column.name, STATUS_EMPTY,
+                                               rule_verdict="빈 셀", decision_method="규칙")
                     continue
+                matched_types: list[str] = []
+                fingerprint = ""
                 for detector in self._detectors_for(profile.tags):
                     self.detector_calls += 1
                     match = detector.match(value, profile, column.name)
+                    match = detector.contextual_match(match, column.name, value)
                     if match is not None:
                         # For interior matches the fragment is masked, never the
                         # whole (potentially huge) cell.
                         masked = mask_value(match.fragment or value)
+                        if not fingerprint:
+                            fingerprint = self.store.fingerprint(value)
                         column.add_hit(match, offset, masked)
                         self.cell_hits += 1
                         if offset > self._last_hit_row:
                             self._last_hit_row = offset
                             self.rows_with_hits += 1
+                        matched_types.append(match.type_key)
                         self.store.add_raw_cell(offset, index, column.name, match, masked,
-                                               detector.column_affinity(column.name), width)
+                                               detector.column_affinity(column.name), width,
+                                               fingerprint=fingerprint)
+                if matched_types:
+                    # The rule verdict needs the finished column ratio, so the cell
+                    # is parked as unsettled until the scan of the column is done.
+                    self.store.add_cell_verdict(
+                        offset, index, column.name, STATUS_UNRATED,
+                        types=matched_types, rule_verdict="규칙 판정 대기",
+                        masked_value=mask_value(value), decision_method="규칙",
+                        needs_review=True, fingerprint=fingerprint,
+                    )
+                    continue
+                cleared = rule_negative_verdict(value, column.name)
+                if cleared:
+                    label, evidence = cleared
+                    self.cleared_cells += 1
+                    self.store.add_cell_verdict(offset, index, column.name, STATUS_NON,
+                                               rule_verdict=label, decision_method="규칙",
+                                               evidence=evidence)
+                else:
+                    self.unrated_cells += 1
+                    self.store.add_cell_verdict(offset, index, column.name, STATUS_UNRATED,
+                                               rule_verdict="규칙 매칭 없음",
+                                               masked_value=mask_value(value),
+                                               decision_method="규칙", needs_review=True,
+                                               evidence="규칙: 개인정보 패턴 없음 (AI/사람 판단 대기)",
+                                               fingerprint=self.store.fingerprint(value))
+            # Rows keep their own identity: the KEY fingerprint is stored next to
+            # the row, never as part of the row key, so two rows with the same KEY
+            # value (or with no KEY at all) remain two separate records.
+            record_fingerprint = self.store.fingerprint("|".join(key_values)) if key_values else ""
+            self.store.close_row(record_fingerprint, f"r:{offset}")
+        # One transaction per batch: far fewer fsync-bound commits than flushing
+        # every buffer, while still surviving a crash mid-file.
+        self.store.commit()
         self.rows_analysed += len(rows)
         self.elapsed_rules += time.perf_counter() - started
 
@@ -228,7 +315,9 @@ class PrivacyEngine:
         """Judge every recorded hit with the finished column ratio.
 
         Streams the detail store in row order, so RAM is bounded by the number of
-        hits in a single row while the full evidence keeps its final verdict.
+        hits in a single row while the full evidence keeps its final verdict. The
+        cell verdict table is updated in the same pass, which is what makes the
+        `privacy_cells` report agree with `privacy_hits` cell by cell.
         """
         support: dict[tuple[int, str], float] = {}
         for column in stats:
@@ -241,25 +330,72 @@ class PrivacyEngine:
         width = 0
         cells: list[CellRecord] = []
         pending: list[tuple] = []
+        # One merged rule verdict per cell: a cell can be matched by several
+        # detectors, and folding them here keeps the UPDATE count at one per cell.
+        merged: dict[tuple[int, int], list] = {}
+
+        def flush_merged() -> None:
+            if not merged:
+                return
+            updates = []
+            for (row, index), (status, confirmed, candidates, conf, review, verdict, evidence) in merged.items():
+                # A confirmed Cell reports only confirmed types; an unconfirmed one
+                # reports the candidate types that put it in "검토 필요".
+                updates.append((status, ",".join(confirmed or candidates), round(conf, 3),
+                                bool(review), row, index, verdict, evidence))
+            self.store.merge_cell_rule_verdicts(updates)
+            merged.clear()
+
         for raw in self.store.iter_raw_cells():
             ratio = support.get((raw["column_index"], raw["type_key"]), 0.0)
             decision, confidence, needs_review = cell_decision(
                 raw["confidence"], raw["confirmed"], ratio, raw["name_hint"]
             )
-            if decision == IGNORE_VERDICT:
-                self.ignored_cells += 1
-                continue
-            if decision == "개인정보":
-                self.pii_cells += 1
-            else:
-                self.review_cells += 1
             if current_row is None or current_row != raw["row"]:
                 if current_row is not None:
-                    self._flush_row(cells, width)
+                    if cells:
+                        self._flush_row(cells, width)
+                    flush_merged()
                 current_row = raw["row"]
                 width = raw["cells_checked"]
                 cells = []
-            pending.append((decision, round(confidence, 3), int(needs_review), round(ratio, 4), raw["id"]))
+            key = (raw["row"], raw["column_index"])
+            entry = merged.get(key)
+            if decision == IGNORE_VERDICT:
+                # A shape that only looks like personal data: the cell is cleared,
+                # not left unjudged.
+                self.ignored_cells += 1
+                if entry is None:
+                    merged[key] = [STATUS_NON, [], [], confidence, False,
+                                   IGNORE_VERDICT,
+                                   f"규칙: {raw['display_name']} 형식만 일치, 근거 부족"]
+                continue
+            if decision == STATUS_PII:
+                self.pii_cells += 1
+            else:
+                self.review_cells += 1
+            if entry is None:
+                merged[key] = [decision,
+                               [raw["display_name"]] if decision == STATUS_PII else [],
+                               [raw["display_name"]],
+                               confidence, needs_review, raw["display_name"], raw["evidence"]]
+            else:
+                # Strongest verdict wins; a weaker match never downgrades a cell.
+                if STATUS_RANK[decision] > STATUS_RANK[entry[0]]:
+                    entry[0] = decision
+                    entry[5] = raw["display_name"]
+                    entry[6] = raw["evidence"]
+                entry[3] = max(entry[3], confidence)
+                entry[4] = entry[4] or needs_review
+                if decision == STATUS_PII:
+                    # Only a confirmed match may name a type on the Cell record; a
+                    # downgraded match stays a candidate, listed in the hit ledger.
+                    if raw["display_name"] and raw["display_name"] not in entry[1]:
+                        entry[1].append(raw["display_name"])
+                elif raw["display_name"] and raw["display_name"] not in entry[2]:
+                    entry[2].append(raw["display_name"])
+            pending.append((decision, round(confidence, 3), int(needs_review),
+                            round(ratio, 4), raw["id"]))
             if len(pending) >= 1000:
                 self.store.set_verdicts(pending)
                 pending.clear()
@@ -272,11 +408,16 @@ class PrivacyEngine:
                 decision=decision, needs_review=needs_review, column_support=round(ratio, 4),
             ))
 
-        if current_row is not None:
+        if current_row is not None and cells:
             self._flush_row(cells, width)
+        flush_merged()
         if pending:
             self.store.set_verdicts(pending)
         self.store.flush()
+        self.store.aggregate_row_verdicts()
+        # Identical personal-data values are grouped in SQLite so the group report
+        # can be streamed without keeping anything in memory.
+        self.store.build_groups()
         return list(self.row_verdicts.values())
 
     def _flush_row(self, cells: list[CellRecord], width: int) -> None:
@@ -330,6 +471,9 @@ class PrivacyEngine:
             "rows_inspected": self.rows_inspected,
             "cells_inspected": self.cells_inspected,
             "empty_cells": self.empty_cells,
+            "key_cells": self.key_cells,
+            "key_columns": len(self.key_indexes),
+            "logical_cells": self.cells_inspected + self.key_cells,  # empty cells are a subset of inspected
             "extra_cells": self.extra_cells,
             "extra_columns": self.extra_columns,
             "detector_calls": self.detector_calls,
@@ -338,6 +482,8 @@ class PrivacyEngine:
             "pii_cells": self.pii_cells,
             "review_cells": self.review_cells,
             "ignored_cells": self.ignored_cells,
+            "cleared_cells": self.cleared_cells,
+            "unrated_cells": self.unrated_cells,
             "detail_cache_rows": len(self.row_verdicts),
             "detail_cache_limit": self.config.max_detail_rows,
             "detail_cache_cells": self.cached_cells,

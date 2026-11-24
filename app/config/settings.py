@@ -38,6 +38,15 @@ class AnalysisConfig:
     max_detail_cells: int = 50_000
     # Where the detail database lives; empty means a temporary file per analysis.
     detail_store_path: str = ""
+    # Function A: columns the user designates as the record KEY. Their cells are
+    # excluded from the privacy scan and reported as `KEY 제외`. Never inferred.
+    key_columns: list[str] = field(default_factory=list)
+    # Which analysis is running: "table" (Function A) or "metadata" (Function B).
+    analysis_kind: str = "table"
+    # How many cells the Cell-level AI may judge per file (reused verdicts count
+    # as judged). Cells beyond the budget stay `미평가` - they are never silently
+    # relabelled as non-personal.
+    ai_context_reuse: bool = True
     # csv module field ceiling. A field longer than this is reported as a parse
     # error (counted in rows_error) rather than silently discarded. It is set
     # per file so JSON/Base64 columns are not rejected by the 131072 default.
@@ -50,12 +59,20 @@ class AnalysisConfig:
     # are skipped unless ai_column_reviews="all". Counts are audited per file.
     max_ai_column_reviews: int = 200
     ai_column_reviews: str = "selective"  # selective | all | none
+    # Cell-level AI review. "none" keeps the rule verdicts only; "selective" sends
+    # the cells the rules could not settle (미평가/검토 필요) in batched Jev-Style
+    # requests; "all" also re-checks rule-cleared cells. Cells the AI never judged
+    # stay 미평가 - they are never relabelled as 비개인정보.
+    max_ai_cell_reviews: int = 2000
+    ai_cell_reviews: str = "selective"  # selective | all | none
+    ai_cell_batch_size: int = 25  # questions per shared-state Jev-Style request
     threads: int = DEFAULT_THREADS
     use_ai: bool = True
     # AI 판정 engine: "jev" (Jev-Style Decision Model), "llm" (generative local GGUF), "auto"
     ai_engine: str = "auto"
     jev_model: str = "auto"  # auto | 0.8b-v3 | 2b-v4
     mode: str = "auto"  # auto | sampling | full
+    resume: bool = False  # continue a cancelled run from its checkpoint row
     sample_rows: int = 1000  # mode=sampling일 실제 분석 행 수
     gpu_layers: int | None = None  # None = auto (999 when a GPU backend is installed, 0 otherwise)
     schema: str = ""
