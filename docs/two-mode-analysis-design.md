@@ -627,7 +627,7 @@ bundle rebuilt, commit + tag + GitHub Release with assets uploaded.
 아래 항목은 **이 환경에서 실행하지 않았으므로 통과로 보고하지 않는다.**
 
 - Windows RAM 8GB CPU-only / NVIDIA GPU / RTX 5060 + CUDA 13.3 실제 추론 → macOS Apple Silicon에서는 실행 불가. PowerShell 스크립트 문법과 DLL 검색 경로만 정적 검증(`pwsh` Parser: `scripts/windows/*.ps1` 9 files, 0 parse errors)
-- Windows EXE / macOS offline bundle 실행 → v0.7.0 split bundle은 rebuilt(assets uploaded) 되었으나 Windows/macOS 환경에서 **解压·실행** Verified가 아니다. Manifest는 rebuild 후 271 entries / 2,530.8 MB, 0 mismatch로 QA 통과
+- Windows EXE / macOS offline bundle 실행 → v0.7.0 split bundle은 rebuilt(assets uploaded) 되었으나 Windows/macOS 환경에서 **unzip·실행** verified가 아니다. Manifest는 rebuild 후 271 entries / 2,530.8 MB, 0 mismatch로 QA 통과
 - VRAM 사용량 → 이 Mac(Metal)에서 ggml backend가 VRAM counter를 노출하지 않음 → `null`로 보고
 - Internet 완전 차단 환경에서의 빌드/실행 → network-off 테스트 없음
 
