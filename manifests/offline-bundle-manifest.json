@@ -1,11 +1,11 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-24T01:18:55.676121+00:00",
+  "generated_at": "2026-11-25T05:50:10.641318+00:00",
   "git": {
-    "commit": "198287197c1dc865c1cb205bc43df2f9d8025f20",
+    "commit": "e5ee58c913779aeb086755cefc47ff6de4c54e4e",
     "branch": "main",
     "repository": "https://github.com/gomin90/piiscan.git",
-    "generated_at": "2026-11-24T01:18:55.712400+00:00"
+    "generated_at": "2026-11-25T05:50:10.675086+00:00"
   },
   "target": {
     "windows": {
@@ -33,7 +33,7 @@
     }
   },
   "file_count": 271,
-  "total_bytes": 2653754914,
+  "total_bytes": 2653762671,
   "total_mb": 2530.8,
   "files": [
     {
@@ -56,14 +56,14 @@
     },
     {
       "path": "README.md",
-      "size": 9016,
-      "sha256": "511a93bea9fc3be6f1f0e4b6d1e938a829d9e32bc19f3b3c846380afa5f74df8",
+      "size": 9256,
+      "sha256": "062c987153677f77b186d08a9635bd54f1e37161001899d7b2bbc46b315d3967",
       "category": "other"
     },
     {
       "path": "app/__init__.py",
       "size": 107,
-      "sha256": "e32973d349953329a8a86a407fa9bced69a0195e50cd694cecbf0773b539e08a",
+      "sha256": "38bee670e691831664fc322d29817efefbdfc5d8ae93c304a3b8000170bf5406",
       "category": "app"
     },
     {
@@ -80,8 +80,8 @@
     },
     {
       "path": "app/ai/gpu_detector.py",
-      "size": 20789,
-      "sha256": "be00304797eb153d351682592ecdc6637d0e1ce0badc06d22353b1920fe55871",
+      "size": 22972,
+      "sha256": "48a125aa4b2d8c86d8b396a728c9004b892c71bbeb5fd2ccb12a1ac3fba68a47",
       "category": "app"
     },
     {
@@ -110,8 +110,8 @@
     },
     {
       "path": "app/ai/jev/model_manager.py",
-      "size": 10176,
-      "sha256": "8be0911d4867a9ce6bada2d0a045e07f1f45493627cadfe5992de44323e605c3",
+      "size": 10958,
+      "sha256": "9d41718290b42562d8efe9648ea656c825a36f8e134ca7ec0fe2f6e27db6797f",
       "category": "app"
     },
     {
@@ -596,8 +596,8 @@
     },
     {
       "path": "docs/windows-test-guide.md",
-      "size": 12729,
-      "sha256": "d3860815fb5d54104e5c65cfe086c6c6e5a2a2b65dbd20e1166c575e988736f5",
+      "size": 14280,
+      "sha256": "4bad54dfe96d088abd281593cf2f7ec159251648d9f0edd53e09c6c8acc9609a",
       "category": "docs"
     },
     {
@@ -980,14 +980,14 @@
     },
     {
       "path": "scripts/windows/gpu-check.ps1",
-      "size": 9229,
-      "sha256": "e7eb0ee500df97feccb310b0ca4043aa004f070e671e2df57172215ffec27d88",
+      "size": 9402,
+      "sha256": "0f38bdba04b0df6e4a00eac179872ddc0b056b2a9b1bbdd9bc13d1870c2c81ce",
       "category": "scripts"
     },
     {
       "path": "scripts/windows/install-cuda-backend.ps1",
-      "size": 7195,
-      "sha256": "d9327d9fe9ca53b23681b1f6034f6105ddfcbd5c74b550ef6fbaf967fecc74d9",
+      "size": 7967,
+      "sha256": "5a6ef577073175c158e948a6460034b44fc91244bcbefd9607683e36815dcde2",
       "category": "scripts"
     },
     {
@@ -1148,8 +1148,8 @@
     },
     {
       "path": "tests/qa/test_jev_ai.py",
-      "size": 11859,
-      "sha256": "1fedd4833240bc7f935d4551acecfe86e5d62b24feb7e0778e795b9deedb67af",
+      "size": 12955,
+      "sha256": "1e029e2c726c0bd701d80dfaeb334167b719c0abc333450bc1846cf03c04373e",
       "category": "other"
     },
     {
@@ -1208,8 +1208,8 @@
     },
     {
       "path": "tests/unit/test_ai.py",
-      "size": 10937,
-      "sha256": "296d671311e28fa5d3c647ef71aa5151d120a6703dad480419e0330363f94eef",
+      "size": 11897,
+      "sha256": "3d85be29b61499a2b926346039887ab5de84ebf9f20dc731e5dd39843cb54bd3",
       "category": "other"
     },
     {
