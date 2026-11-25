@@ -1,11 +1,11 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-25T05:50:10.641318+00:00",
+  "generated_at": "2026-11-25T06:19:02.070539+00:00",
   "git": {
-    "commit": "e5ee58c913779aeb086755cefc47ff6de4c54e4e",
+    "commit": "407039b4a591e368a72e0e864406875eafb81c27",
     "branch": "main",
     "repository": "https://github.com/gomin90/piiscan.git",
-    "generated_at": "2026-11-25T05:50:10.675086+00:00"
+    "generated_at": "2026-11-25T06:19:02.104544+00:00"
   },
   "target": {
     "windows": {
@@ -33,7 +33,7 @@
     }
   },
   "file_count": 271,
-  "total_bytes": 2653762671,
+  "total_bytes": 2653768412,
   "total_mb": 2530.8,
   "files": [
     {
@@ -80,8 +80,8 @@
     },
     {
       "path": "app/ai/gpu_detector.py",
-      "size": 22972,
-      "sha256": "48a125aa4b2d8c86d8b396a728c9004b892c71bbeb5fd2ccb12a1ac3fba68a47",
+      "size": 24091,
+      "sha256": "3dc265245048ded3483301765afa6b5bab95a1294e625688394a35179b5ef354",
       "category": "app"
     },
     {
@@ -560,8 +560,8 @@
     },
     {
       "path": "docs/gpu-cuda-verification.md",
-      "size": 5553,
-      "sha256": "784026c0a41314f592a749dae11244777053339cc7f22e6949252cb45d6da82e",
+      "size": 5900,
+      "sha256": "d4c2846aa57306373f96aaa73ec334d46cf87212be0d96b605997fdcd2f65bca",
       "category": "docs"
     },
     {
@@ -980,8 +980,8 @@
     },
     {
       "path": "scripts/windows/gpu-check.ps1",
-      "size": 9402,
-      "sha256": "0f38bdba04b0df6e4a00eac179872ddc0b056b2a9b1bbdd9bc13d1870c2c81ce",
+      "size": 11823,
+      "sha256": "0468376aec1bebd0dc371b23224507e7861eea2a407ca67341dac85635ccdaff",
       "category": "scripts"
     },
     {
@@ -1208,8 +1208,8 @@
     },
     {
       "path": "tests/unit/test_ai.py",
-      "size": 11897,
-      "sha256": "3d85be29b61499a2b926346039887ab5de84ebf9f20dc731e5dd39843cb54bd3",
+      "size": 13751,
+      "sha256": "f14b5c63dd3a86ec77d5d3038b528c9bb6fca9ac0228f037d15e795515ff2f70",
       "category": "other"
     },
     {
