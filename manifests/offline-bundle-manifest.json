@@ -1,11 +1,11 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-25T06:19:02.070539+00:00",
+  "generated_at": "2026-11-25T06:58:10.572739+00:00",
   "git": {
-    "commit": "407039b4a591e368a72e0e864406875eafb81c27",
+    "commit": "6346a70029b974058c600956ad0dac4b0d33f6b9",
     "branch": "main",
     "repository": "https://github.com/gomin90/piiscan.git",
-    "generated_at": "2026-11-25T06:19:02.104544+00:00"
+    "generated_at": "2026-11-25T06:58:10.607241+00:00"
   },
   "target": {
     "windows": {
@@ -32,8 +32,8 @@
       "scorer": "jev_score_v2.cpp"
     }
   },
-  "file_count": 271,
-  "total_bytes": 2653768412,
+  "file_count": 272,
+  "total_bytes": 2653780650,
   "total_mb": 2530.8,
   "files": [
     {
@@ -57,13 +57,13 @@
     {
       "path": "README.md",
       "size": 9256,
-      "sha256": "062c987153677f77b186d08a9635bd54f1e37161001899d7b2bbc46b315d3967",
+      "sha256": "7b6b2c31bd0b5f324c454147a0f338437ee914d8eabc7758fb3d4f26aafe8eff",
       "category": "other"
     },
     {
       "path": "app/__init__.py",
       "size": 107,
-      "sha256": "38bee670e691831664fc322d29817efefbdfc5d8ae93c304a3b8000170bf5406",
+      "sha256": "55fa661643623c930ee3c43a40645285a5de9cdbf25b284ae09dd9cab1075bb5",
       "category": "app"
     },
     {
@@ -110,8 +110,8 @@
     },
     {
       "path": "app/ai/jev/model_manager.py",
-      "size": 10958,
-      "sha256": "9d41718290b42562d8efe9648ea656c825a36f8e134ca7ec0fe2f6e27db6797f",
+      "size": 13738,
+      "sha256": "6689a95e3587df3028d08d0382498439d39696a54dd64ed968159a6fdc66d8dd",
       "category": "app"
     },
     {
@@ -422,8 +422,8 @@
     },
     {
       "path": "app/metadata_analysis/metadata_service.py",
-      "size": 14448,
-      "sha256": "33ab70ec34efdd4c8fee5d270713322b106047c70cc4354d57df94f3b62a9723",
+      "size": 14565,
+      "sha256": "13888fa1347c83cfa1ad826ef923cfdd3fb6cacb944b679794fe0324a9c9fada",
       "category": "app"
     },
     {
@@ -596,8 +596,8 @@
     },
     {
       "path": "docs/windows-test-guide.md",
-      "size": 14280,
-      "sha256": "4bad54dfe96d088abd281593cf2f7ec159251648d9f0edd53e09c6c8acc9609a",
+      "size": 15659,
+      "sha256": "7578598c6e7cd579a909af8478578d4b0e93c1177dbe93a7664dbded3bb64d9c",
       "category": "docs"
     },
     {
@@ -962,8 +962,8 @@
     },
     {
       "path": "scripts/windows/build-jev-score.ps1",
-      "size": 2744,
-      "sha256": "791375bd83b70145b47c5f8c40db24468b9dc5a547e0a49e1f07008a60260f4c",
+      "size": 3096,
+      "sha256": "92378c8087a40b9bf1c40725f6d7eafd2e18a1626ad8decdbd4ba0961bfae839",
       "category": "scripts"
     },
     {
@@ -980,8 +980,8 @@
     },
     {
       "path": "scripts/windows/gpu-check.ps1",
-      "size": 11823,
-      "sha256": "0468376aec1bebd0dc371b23224507e7861eea2a407ca67341dac85635ccdaff",
+      "size": 12165,
+      "sha256": "73c69b749a1211c4c27fbcfaa3fa046f9cdbc3d33d145a83c1e512add8826c85",
       "category": "scripts"
     },
     {
@@ -1148,8 +1148,8 @@
     },
     {
       "path": "tests/qa/test_jev_ai.py",
-      "size": 12955,
-      "sha256": "1e029e2c726c0bd701d80dfaeb334167b719c0abc333450bc1846cf03c04373e",
+      "size": 17329,
+      "sha256": "ab8546faafcbc14690b567c66ecf52f6ef0370c6bd4892eec57b20c984e79573",
       "category": "other"
     },
     {
@@ -1204,6 +1204,12 @@
       "path": "tests/qa/test_two_mode_core.py",
       "size": 13727,
       "sha256": "90b3f3fe0b3031fe30ff67c7b45826da9b769ec911c74a48cf7663abeaf79f04",
+      "category": "other"
+    },
+    {
+      "path": "tests/qa/test_windows_scripts.py",
+      "size": 2894,
+      "sha256": "699bc7b7fe24dbba642bb14eb412f53ca485265dc90d36cfaf7ae1b7767407a4",
       "category": "other"
     },
     {
