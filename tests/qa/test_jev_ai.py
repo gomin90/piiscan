@@ -259,6 +259,29 @@ def test_windows_discovery_uses_exe_and_requires_llama_dlls(tmp_path, monkeypatc
     assert spec.verified is False
 
 
+def test_windows_prefers_the_scorer_whose_runtime_dlls_are_present(tmp_path, monkeypatch):
+    """install-cuda-backend.ps1 puts ggml-cuda.dll in runtime/windows, and llama.cpp only
+    searches the executable's own directory, so the runtime scorer must win over the
+    cross-built build/ exe that has no llama.cpp DLLs beside it."""
+    from app.ai.jev import model_manager
+
+    model_dir = _make_fake_bundle(tmp_path)
+    build = model_dir / "0.8b-v3" / "build"
+    build.mkdir(parents=True)
+    (build / "jev-score.exe").write_bytes(b"MZ cross-built, no runtime next to it")
+
+    monkeypatch.setattr(model_manager, "IS_WINDOWS", True)
+    spec = JevStyleModelManager(root=model_dir).discover()[0]
+    assert spec.scorer_path.parent.name == "windows"
+    assert spec.verified is True
+
+    # Nothing runnable anywhere: the first existing file is still reported, with its problem.
+    (tmp_path / "runtime" / "windows" / "llama.dll").unlink()
+    spec = JevStyleModelManager(root=model_dir).discover()[0]
+    assert "native library" in " ".join(spec.problems)
+    assert spec.verified is False
+
+
 def test_mac_discovery_does_not_pick_windows_exe(tmp_path, monkeypatch):
     from app.ai.jev import model_manager
 

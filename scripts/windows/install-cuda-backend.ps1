@@ -144,7 +144,21 @@ if (Test-Path -LiteralPath $cudaRoot) {
 if ($copied -eq 0) {
     Write-Host "NOTE: no CUDA runtime DLLs found - a CUDA toolkit (13.3 or 12.4) must be installed,"
     Write-Host "      or the NVIDIA driver's redistributable DLLs must be on PATH."
+    Write-Host "      Without cublas64_13.dll / cublasLt64_13.dll ggml-cuda.dll cannot initialise:"
+    Write-Host "      scripts\windows\fetch-cuda-backend.ps1 -CudaVersion 13.5"
 }
 
 Write-Host "Extracted $taken DLLs into runtime\windows"
+Write-Host "runtime\windows now holds:"
+foreach ($f in (Get-ChildItem -LiteralPath $out -Filter *.dll)) {
+    Write-Host ("  {0,-30} {1,8} MB" -f $f.Name, [math]::Round($f.Length / 1MB, 1))
+}
+
+$exe = Join-Path $root "dist\PrivacyScanner.exe"
+if (Test-Path -LiteralPath $exe) {
+    Write-Host "NOTE: dist\PrivacyScanner.exe was built before this install - PyInstaller embedded"
+    Write-Host "      runtime\windows at build time, so the EXE still contains only the CPU backend."
+    Write-Host "      Re-run scripts\windows\build-exe.ps1, or set GGML_BACKEND_DIR to this runtime\windows."
+}
+
 Write-Host "Verify with: scripts\windows\gpu-check.ps1"

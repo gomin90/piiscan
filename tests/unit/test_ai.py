@@ -37,6 +37,27 @@ def test_gpu_without_backend_library_is_reported_as_cpu(monkeypatch, tmp_path: P
     assert report.backend == "cuda"
 
 
+def test_installed_cuda_backend_is_found_regardless_of_the_process_cwd(monkeypatch, tmp_path: Path):
+    """install-cuda-backend.ps1 puts the backend in runtime/windows; the probe must find it
+    even when the process runs from dist/ or any other directory."""
+    from app.ai import gpu_detector
+
+    runtime = tmp_path / "runtime" / "windows"
+    runtime.mkdir(parents=True)
+    (runtime / "ggml-cuda.dll").write_bytes(b"cublas64_13.dll cublasLt64_13.dll sm_120")
+    (runtime / "cublas64_13.dll").write_bytes(b"x")
+    (runtime / "cublasLt64_13.dll").write_bytes(b"x")
+
+    monkeypatch.setenv("GGML_BACKEND_DIR", str(runtime))
+    monkeypatch.setattr(gpu_detector, "_nvidia_gpu", lambda: ("NVIDIA", "RTX 5060", 8.0, 6.0, "550.0"))
+    monkeypatch.chdir(tmp_path)
+
+    report = gpu_detector.detect_hardware(system="Windows")
+    assert report.gpu_backend_ready is True
+    assert report.backend == "cuda"
+    assert report.backend_detail["missing"] == []
+
+
 def test_windows_gpu_fallback_uses_wmi_when_no_nvidia_smi(monkeypatch, tmp_path: Path):
     from app.ai import gpu_detector
 

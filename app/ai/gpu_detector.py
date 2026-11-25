@@ -105,18 +105,52 @@ def _system_key(system: str | None = None) -> str:
 
 
 def _search_dirs(binary_dir: Path | None) -> list[Path]:
+    """Directories llama.cpp can load a ggml backend from, in its own search order.
+
+    ggml_backend_reg.cpp searches GGML_BACKEND_DIR, the executable's directory, the
+    current working directory, then GGML_BACKEND_PATH. PATH is *not* searched, so a
+    backend that is neither next to the scorer nor in one of the bundle runtime dirs is
+    invisible - which is why this list, not the CWD alone, decides the verdict.
+    """
     root = Path(__file__).resolve().parents[2]
     dirs = []
+    for env_var in ("GGML_BACKEND_DIR", "GGML_BACKEND_PATH"):
+        for entry in os.environ.get(env_var, "").split(os.pathsep):
+            if entry:
+                dirs.append(Path(entry))
     if binary_dir:
         dirs.append(Path(binary_dir))
     dirs += [
         root / "runtime" / "windows",
         root / "runtime" / "macos",
         root / "runtime" / "linux",
+        Path.cwd(),
+        root / "runtime",
         root / "models" / "jev-style" / "0.8b-v3" / "build",
         root / "models" / "jev-style" / "2b-v4" / "build",
     ]
     return [d for d in dirs if d and d.exists()]
+
+
+CUDA_BACKEND_NAMES = ("ggml-cuda.dll", "libggml-cuda.so", "libggml-cuda.dylib")
+
+
+def find_gpu_backend(binary_dir: Path | None = None, system: str | None = None,
+                    names: tuple[str, ...] | None = None) -> tuple[str, Path | None]:
+    """Locate the GPU backend library this machine could actually load.
+
+    Returns (library name, path). Every gate in the detector uses this single lookup so
+    "backend present" and "backend usable" can never disagree about where the library is.
+    """
+    if names is None:
+        key = _system_key(system)
+        names = GPU_BACKENDS.get(key, ()) or tuple(name for group in GPU_BACKENDS.values() for name in group)
+    for name in names:
+        for directory in _search_dirs(binary_dir):
+            candidate = directory / name
+            if candidate.is_file():
+                return name, candidate
+    return "", None
 
 
 def gpu_backend_present(binary_dir: Path | None = None, system: str | None = None) -> tuple[bool, str]:
@@ -125,13 +159,8 @@ def gpu_backend_present(binary_dir: Path | None = None, system: str | None = Non
     Returns (found, path). Detecting an NVIDIA card is not enough: without ggml-cuda.dll
     (Windows) or libggml-metal.dylib (macOS) llama.cpp runs on the CPU.
     """
-    key = {"Windows": "windows", "Linux": "linux", "Darwin": "macos"}.get(system or platform.system(), "")
-    for name in GPU_BACKENDS.get(key, ()):
-        for directory in _search_dirs(binary_dir):
-            candidate = directory / name
-            if candidate.exists():
-                return True, str(candidate)
-    return False, ""
+    name, path = find_gpu_backend(binary_dir, system)
+    return (path is not None), str(path) if path else ""
 
 
 # ---------------------------------------------------------------- CUDA forensics
@@ -324,16 +353,15 @@ def analyze_cuda_backend(library: Path, binary_dir: Path | None = None,
 
 def cuda_backend_status(binary_dir: Path | None = None) -> dict:
     """Locate the CUDA backend in a runtime directory and diagnose it."""
-    binary_dir = Path(binary_dir) if binary_dir else Path("runtime/windows")
-    library = next((binary_dir / name for name in ("ggml-cuda.dll", "libggml-cuda.so", "libggml-cuda.dylib")
-                    if (binary_dir / name).is_file()), None)
+    _, library = find_gpu_backend(binary_dir, names=CUDA_BACKEND_NAMES)
     if library is None:
+        searched = ", ".join(str(d) for d in _search_dirs(binary_dir)) or "no runtime directory"
         return {
             "present": False, "library": "", "runtime_dlls": [], "missing": [], "archs": [],
             "ptx_archs": [], "device_arch": "", "driver_cuda": "", "usable": False,
-            "reason": "no ggml-cuda backend in " + str(binary_dir) + " -> llama.cpp must run on CPU",
+            "reason": f"no ggml-cuda backend found (searched {searched}) -> llama.cpp must run on CPU",
         }
-    return analyze_cuda_backend(library, binary_dir)
+    return analyze_cuda_backend(library, library.parent)
 
 
 def _nvidia_gpu() -> tuple[str, str, float, float, str]:
@@ -441,6 +469,28 @@ def gpu_plan(scorer_path: Path, hardware: HardwareReport, requested_layers: int 
     return "cpu", 0, ""
 
 
+def _cuda_fix_hint(detail: dict) -> str:
+    """Name the exact next command for whichever CUDA gate failed."""
+    if not detail.get("present"):
+        return (
+            "scripts\\windows\\install-cuda-backend.ps1 실행 (vendor\\llama-windows의 ggml-cuda.dll을 "
+            "runtime\\windows에 추출). EXE를 이미 빌드했다면 DLL이 runtime\\windows에 들어온 뒤 "
+            "build-exe.ps1로 다시빌드하거나 GGML_BACKEND_DIR=runtime\\windows로 지정해야 함 "
+            "(llama.cpp는 PATH를 search하지 않는다)."
+        )
+    if detail.get("missing"):
+        return (
+            f"{', '.join(detail['missing'])} 없음: CUDA toolkit(13.3 또는 12.4) 설치 후 "
+            "install-cuda-backend.ps1 재실행(%CUDA_PATH%의 bin 또는 bin\\x64에서 cublas DLL을 복사한다), 또는 "
+            "scripts\\windows\\fetch-cuda-backend.ps1 -CudaVersion 13.5로 runtime DLL 확보."
+        )
+    return (
+        "GPU compute capability와 backend kernel이 mismatch: "
+        "install-cuda-backend.ps1 -CudaVersion 13.5 (sm_86/sm_89/sm_103/sm_120/sm_121; "
+        "the 12.4 asset only carries sm_50-sm_90 kernel)."
+    )
+
+
 def detect_hardware(binary_dir: Path | None = None, system: str | None = None) -> HardwareReport:
     """Probe the machine and decide which inference backend can really be used."""
     system = system or platform.system()
@@ -455,19 +505,16 @@ def detect_hardware(binary_dir: Path | None = None, system: str | None = None) -
     backend_ready, backend_path = gpu_backend_present(binary_dir, system)
 
     if vendor == "NVIDIA":
-        detail = cuda_backend_status(binary_dir) if backend_ready else {
-            "present": False, "usable": False,
-            "reason": "ggml-cuda.dll is not installed next to the scorer",
-        }
+        detail = cuda_backend_status(binary_dir)
         arch = detail.get("device_arch", "") or cuda_device_arch()
         if detail.get("usable"):
             backend = "cuda"
-            notes.append(f"CUDA backend 사용 가능: {backend_path} ({arch or 'compute capability 알 수 없음'})")
+            notes.append(f"CUDA backend 사용 가능: {detail['library']} ({arch or 'compute capability 알 수 없음'})")
         else:
             backend = "cpu"
             notes.append(
                 f"NVIDIA {model} 감지(VRAM {vram_total:.1f}GB) but CUDA cannot be used: {detail['reason']}. "
-                "GPU 추론하려면 GPU arch/runtime이 맞는 ggml-cuda.dll을 scripts/windows/install-cuda-backend.ps1로 설치해야 함"
+                f"조치: {_cuda_fix_hint(detail)}"
             )
         detail["gpu_model"] = model
         detail["gpu_vendor"] = vendor

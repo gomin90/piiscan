@@ -169,6 +169,21 @@ class JevStyleModelManager:
             missing.append("ggml-cpu-*.dll")
         return missing
 
+    def _pick_scorer(self, candidates: list[Path]) -> Path | None:
+        """Choose the candidate that can actually start, not just the first file found.
+
+        On Windows llama.cpp only looks for ggml backends in the *executable's own
+        directory* and the CWD, so a scorer picked from models/jev-style/<release>/build/
+        (cross-built here, without the runtime DLLs) can never load the CUDA backend that
+        install-cuda-backend.ps1 extracts into runtime/windows. Preferring a scorer that
+        has its runtime beside it keeps the GPU backend discoverable.
+        """
+        existing = [path for path in candidates if path.is_file()]
+        for path in existing:
+            if not self._native_libs_ok(path):
+                return path
+        return existing[0] if existing else None
+
     def discover(self) -> list[JevStyleModelSpec]:
         specs: list[JevStyleModelSpec] = []
         for key, meta in REGISTRY.items():
@@ -191,7 +206,7 @@ class JevStyleModelManager:
             ))
             if env_bin.is_file():
                 candidate_scorers.append(env_bin)
-            scorer = next((path for path in candidate_scorers if path.is_file()), None)
+            scorer = self._pick_scorer(candidate_scorers)
 
             architecture = read_gguf_metadata(gguf, ("general.architecture", "general.name", "general.quantization_version"))
             problems: list[str] = []

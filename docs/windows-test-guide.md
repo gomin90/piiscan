@@ -128,8 +128,22 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\fetch-cuda-backend.ps1 
 
 `install-cuda-backend.ps1` verifies the ZIP SHA256, extracts `ggml-cuda.dll` (and the
 matching `llama.dll` / `ggml*.dll`, byte-identical to the CPU asset) into
-`runtime\windows`, and copies `cublas*.dll` from `%CUDA_PATH%\bin` so the CUDA runtime
-is resolvable without internet.
+`runtime\windows`, copies `cublas*.dll` from `%CUDA_PATH%\bin` so the CUDA runtime
+is resolvable without internet, and finally lists every DLL it placed.
+
+**순서 주의**: `build-exe.ps1` packs the whole `runtime/` directory into
+`dist\PrivacyScanner.exe` (`--add-data`). CUDA DLL을 EXE 빌드 ** 후에** 추출하면 packaged EXE에는
+CPU backend만 embedded되어 GPU는 never used. After installing the backend either re-run
+`build-exe.ps1` or export `GGML_BACKEND_DIR=<bundle>\runtime\windows` before launching.
+
+If the install succeeded but the app still says "ggml-cuda.dll 설치해야 함", read
+`hardware.backend_detail.reason` in the report JSON - it names the exact gate:
+
+| reason | fix |
+|---|---|
+| `no ggml-cuda backend found` | backend not next to the scorer (stale EXE, or run from another directory): re-run `build-exe.ps1` or set `GGML_BACKEND_DIR` |
+| `ggml-cuda.dll needs cublas64_13.dll ...` | CUDA toolkit missing: install CUDA 13.3 then re-run `install-cuda-backend.ps1`, or `fetch-cuda-backend.ps1 -CudaVersion 13.5` |
+| `GPU is sm_120 but the backend has kernels only for sm_50..sm_90` | wrong asset: `install-cuda-backend.ps1 -CudaVersion 13.5` |
 
 ### Why "GPU 있음에도 CPU 추론" happens
 
@@ -140,14 +154,19 @@ status line:
 1. **Detection** - `nvidia-smi` must be on PATH. If it is not, the probe falls back to
    Windows WMI (`Get-CimInstance Win32_VideoController`), so the card is still listed.
    "GPU detected" therefore only means the card exists, not that CUDA works.
-2. **A CUDA backend library must sit next to the scorer.** `ggml_backend_load_all()`
-   searches `GGML_BACKEND_DIR` (not set in official builds), the **executable's own
-   directory**, then the **current working directory**. `PATH` is *not* searched, so
-   `ggml-cuda.dll` has to be in `runtime\windows` next to `jev-score.exe`.
+2. **A CUDA backend library must sit in the directory of the scorer that actually runs.**
+   `ggml_backend_load_best()` searches only `GGML_BACKEND_DIR` (a **compile-time** macro,
+   not set in the official binaries), the **executable's own directory**, then the
+   **current working directory**; `GGML_BACKEND_PATH` can add one out-of-tree backend file.
+   `PATH` is *not* searched for `ggml-cuda.dll`, so it has to be in `runtime\windows`
+   next to `jev-score.exe`. Note that `models\jev-style\<release>\build\*.exe` (built on
+   macOS for the bundle) is only usable if the llama.cpp DLLs sit beside it - the manager
+   now prefers the `runtime\windows` scorer, whose directory holds them.
 3. **The CUDA runtime DLLs that `ggml-cuda.dll` imports must be resolvable.** llama.cpp
-   statically links `cudart`, but `cublas`/`cublasLt` stay dynamic: the CUDA 12.4 asset
-   needs `cublas64_12.dll`, and a machine with only CUDA 13 installed does not have it.
-   `cuda_backend_status()` reports the exact missing DLL.
+   statically links `cudart`, but `cublas`/`cublasLt` stay dynamic and are resolved by the
+   Windows loader: exe directory -> System32 -> Windows directory -> CWD -> **PATH**. So
+   `cublas64_13.dll` may live next to the scorer, in `%CUDA_PATH%\bin` if that folder is in
+   `PATH`, or anywhere on `PATH`. `cuda_backend_status()` reports the exact missing DLL.
 4. **The GPU's compute capability must be compiled into that DLL.** The CUDA 12.4 asset
    contains device code only for sm_50-sm_90. Per llama.cpp's own build table, Blackwell
    (sm_120, i.e. RTX 50 series) requires CUDA >= 12.8, so an RTX 5060 cannot run the

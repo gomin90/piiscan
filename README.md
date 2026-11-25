@@ -145,13 +145,16 @@ GitHub's "Download ZIP" only serves LFS **pointers**, and the whole bundle is 2.
 three and unzip them into one directory:
 
 ```
-piiscan-app.zip          771.3 MB   code, native runtime, CUDA 13.5 DLLs, wheelhouse, scripts, docs, manifest
-piiscan-model-0.8b.zip   508.6 MB   0.8B v3 GGUF + tokenizer
-piiscan-model-2b.zip    1219.1 MB   2B v4 GGUF + tokenizer
+piiscan-app.zip          code, native CPU runtime, vendored CUDA 12.4/13.5 backend zips, wheelhouse, scripts, docs, manifest
+piiscan-model-0.8b.zip   0.8B v3 GGUF + tokenizer
+piiscan-model-2b.zip     2B v4 GGUF + tokenizer
 ```
 
-Published at [release v0.7.0](https://github.com/gomin90/piiscan/releases/tag/v0.7.0).
-Build them yourself with `python tools/make_release_bundle.py --split`, then check integrity with
+Published at [release v0.7.2](https://github.com/gomin90/piiscan/releases/tag/v0.7.2).
+GPU inference on Windows is not enabled by the bundle alone: run
+`scripts\windows\install-cuda-backend.ps1`, which extracts the matching CUDA backend
+(and its cuBLAS DLLs) from the vendored zips into `runtime\windows` - no internet needed.
+Build the bundles yourself with `python tools/make_release_bundle.py --split`, then check integrity with
 `scripts/windows/verify-offline-bundle.ps1`.
 
 See [docs/architecture.md](docs/architecture.md) and
