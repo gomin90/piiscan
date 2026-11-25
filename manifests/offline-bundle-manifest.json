@@ -1,11 +1,11 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-25T03:38:07.265071+00:00",
+  "generated_at": "2026-11-25T03:51:34.129978+00:00",
   "git": {
     "commit": "114c700e5e82ccedddfd291138d84d3d9de70298",
     "branch": "dev/pii-policy-accuracy",
     "repository": "https://github.com/gomin90/piiscan.git",
-    "generated_at": "2026-11-25T03:38:07.308348+00:00"
+    "generated_at": "2026-11-25T03:51:34.164216+00:00"
   },
   "target": {
     "windows": {
@@ -33,7 +33,7 @@
     }
   },
   "file_count": 280,
-  "total_bytes": 2653933856,
+  "total_bytes": 2653934403,
   "total_mb": 2531.0,
   "files": [
     {
@@ -608,8 +608,8 @@
     },
     {
       "path": "docs/two-mode-analysis-design.md",
-      "size": 62321,
-      "sha256": "e509af3e0882ff4baa9ab1a8776659415bac7549c3a2d2a1d4815c64e47f67ad",
+      "size": 62868,
+      "sha256": "463b316cd0a75c84d9e1b9a9939d0e7da661770e2264d86fa95f1873005003f2",
       "category": "docs"
     },
     {
