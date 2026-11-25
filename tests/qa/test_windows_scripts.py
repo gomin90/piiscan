@@ -45,24 +45,24 @@ def test_script_parses(script: Path):
 
 @pytest.mark.parametrize("script", WINDOWS_SCRIPTS, ids=lambda p: p.name)
 def test_scripts_have_balanced_braces(script: Path):
-    """A cheap guard for the unclosed-block case, ignoring braces inside quoted strings."""
-    text = script.read_text(encoding="utf-8")
-    unquoted = []
-    in_string = None
-    for char in text:
-        if in_string:
-            if char == in_string:
-                in_string = None
-        elif char in "'\"":
-            in_string = char
-        else:
-            unquoted.append(char)
+    """A cheap guard for the unclosed-block case, ignoring braces inside quoted
+    strings and inside comments (an apostrophe in a comment is not a string)."""
     depth = 0
-    for char in unquoted:
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth < 0:
-                break
+    in_string = None
+    for line in script.read_text(encoding="utf-8").splitlines():
+        for char in line:
+            if in_string:
+                if char == in_string:
+                    in_string = None
+                continue
+            if char == "#":
+                break  # rest of the line is a comment
+            if char in "'\"":
+                in_string = char
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth < 0:
+                    break
     assert depth == 0, f"{script.name} has unbalanced braces (depth {depth})"

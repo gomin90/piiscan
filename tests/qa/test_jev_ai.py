@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -246,6 +247,7 @@ def test_windows_discovery_uses_exe_and_requires_llama_dlls(tmp_path, monkeypatc
     from app.ai.jev import model_manager
 
     monkeypatch.setattr(model_manager, "IS_WINDOWS", True)
+    monkeypatch.chdir(tmp_path)
     manager = JevStyleModelManager(root=_make_fake_bundle(tmp_path))
     spec = manager.discover()[0]
     assert spec.scorer_path.name == "jev-score.exe"
@@ -271,6 +273,7 @@ def test_windows_prefers_the_scorer_whose_runtime_dlls_are_present(tmp_path, mon
     (build / "jev-score.exe").write_bytes(b"MZ cross-built, no runtime next to it")
 
     monkeypatch.setattr(model_manager, "IS_WINDOWS", True)
+    monkeypatch.chdir(tmp_path)
     spec = JevStyleModelManager(root=model_dir).discover()[0]
     assert spec.scorer_path.parent.name == "windows"
     assert spec.verified is True
@@ -280,6 +283,86 @@ def test_windows_prefers_the_scorer_whose_runtime_dlls_are_present(tmp_path, mon
     spec = JevStyleModelManager(root=model_dir).discover()[0]
     assert "native library" in " ".join(spec.problems)
     assert spec.verified is False
+
+
+def test_windows_finds_the_scorer_next_to_the_process_not_only_the_project_root(tmp_path, monkeypatch):
+    """The bundle can be unpacked anywhere and run from that folder; the runtime sitting
+    in the CWD (or next to a frozen EXE) must be searched too, otherwise the app reports
+    'scorer not built' and the AI layer silently does nothing."""
+    from app.ai.jev import model_manager
+
+    bundle = tmp_path / "unpacked-bundle"
+    model_dir = _make_fake_bundle(bundle)
+    elsewhere = tmp_path / "run-from-here"
+    runtime = elsewhere / "runtime" / "windows"
+    runtime.mkdir(parents=True)
+    (runtime / "jev-score.exe").write_bytes(b"MZ runtime scorer")
+    for dll in ("llama.dll", "ggml.dll", "ggml-base.dll", "libomp.dll", "ggml-cpu-x64.dll"):
+        (runtime / dll).write_bytes(b"x")
+    # the unpacked bundle's own runtime copy is gone (e.g. only the model zip was extracted)
+    for path in (bundle / "runtime" / "windows").iterdir():
+        path.unlink()
+
+    monkeypatch.setattr(model_manager, "IS_WINDOWS", True)
+    monkeypatch.setattr(model_manager, "project_root", lambda: bundle)
+    monkeypatch.chdir(elsewhere)
+    spec = model_manager.JevStyleModelManager().discover()[0]
+    assert spec.scorer_path == runtime / "jev-score.exe"
+    assert spec.verified is True
+    assert model_dir in spec.directory.parents
+
+
+def test_windows_finds_a_natively_built_scorer(tmp_path, monkeypatch):
+    """scripts/windows/build-jev-score.ps1 compiles the scorer into vendor/llama.cpp/build-native/bin."""
+    from app.ai.jev import model_manager
+
+    model_dir = _make_fake_bundle(tmp_path, with_dlls=False)
+    for path in (tmp_path / "runtime" / "windows").iterdir():
+        path.unlink()
+    monkeypatch.chdir(tmp_path)
+    native = tmp_path / "vendor" / "llama.cpp" / "build-native" / "bin"
+    native.mkdir(parents=True)
+    exe = native / "jev-score.exe"
+    exe.write_bytes(b"MZ native scorer")
+    for dll in ("llama.dll", "ggml.dll", "ggml-base.dll", "libomp.dll", "ggml-cpu-x64.dll"):
+        (native / dll).write_bytes(b"x")
+
+    monkeypatch.setattr(model_manager, "IS_WINDOWS", True)
+    spec = JevStyleModelManager(root=model_dir).discover()[0]
+    assert spec.scorer_path == exe
+    assert spec.verified is True
+
+
+def test_missing_scorer_names_the_places_it_searched(tmp_path, monkeypatch):
+    from app.ai.jev import model_manager
+
+    model_dir = _make_fake_bundle(tmp_path, with_dlls=False)
+    for path in (tmp_path / "runtime" / "windows").iterdir():
+        path.unlink()
+
+    monkeypatch.setattr(model_manager, "IS_WINDOWS", True)
+    monkeypatch.chdir(tmp_path)
+    spec = JevStyleModelManager(root=model_dir).discover()[0]
+    message = " ".join(spec.problems)
+    assert "jev-score.exe" in message and "searched" in message
+
+
+def test_model_and_scorer_are_found_next_to_the_process(tmp_path, monkeypatch):
+    """A bundle unpacked anywhere and run from there must still expose its models and
+    scorer, even though `app/config/settings.py` lives somewhere else."""
+    from app.ai.jev import model_manager
+
+    bundle = tmp_path / "unpacked-bundle"
+    _make_fake_bundle(bundle)
+    monkeypatch.setattr(model_manager, "IS_WINDOWS", True)
+    monkeypatch.setattr(model_manager, "project_root", lambda: tmp_path / "does-not-exist")
+    monkeypatch.chdir(bundle)
+    monkeypatch.setattr(sys, "argv", [str(bundle / "dist" / "PrivacyScanner.exe")])
+
+    manager = model_manager.JevStyleModelManager()
+    assert manager.root == bundle / "models" / "jev-style"
+    spec = manager.discover()[0]
+    assert spec.scorer_path == bundle / "runtime" / "windows" / "jev-score.exe"
 
 
 def test_mac_discovery_does_not_pick_windows_exe(tmp_path, monkeypatch):
@@ -295,3 +378,20 @@ def test_mac_discovery_does_not_pick_windows_exe(tmp_path, monkeypatch):
     (tmp_path / "models" / "jev-style" / "0.8b-v3" / "build" / "jev-score").write_bytes(b"binary")
     spec = manager.discover()[0]
     assert spec.scorer_path.name == "jev-score"
+
+
+def test_piiscan_home_points_discovery_at_an_unpacked_bundle(tmp_path, monkeypatch):
+    """PIISCAN_HOME is the documented escape hatch when the bundle is unpacked elsewhere."""
+    from app.ai.jev import model_manager
+
+    bundle = tmp_path / "somewhere-else"
+    _make_fake_bundle(bundle)
+    monkeypatch.setattr(model_manager, "IS_WINDOWS", True)
+    monkeypatch.setenv("PIISCAN_HOME", str(bundle))
+    monkeypatch.chdir(tmp_path)
+
+    manager = model_manager.JevStyleModelManager()
+    assert manager.root == bundle / "models" / "jev-style"
+    spec = manager.discover()[0]
+    assert spec.scorer_path == bundle / "runtime" / "windows" / "jev-score.exe"
+    assert spec.verified is True

@@ -11,6 +11,7 @@ import json
 import os
 import platform
 import struct
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -19,6 +20,8 @@ from app.config.settings import project_root
 IS_WINDOWS = os.name == "nt"
 # Windows용 preload된 scorer + llama.cpp DLL (cross-built on macOS, see runtime/windows/BUILD-INFO.json)
 WINDOWS_RUNTIME_DIR = "runtime/windows"
+# scripts/windows/build-jev-score.ps1 writes the natively compiled scorer here.
+NATIVE_BUILD_DIR = "vendor/llama.cpp/build-native/bin"
 WINDOWS_REQUIRED_DLLS = ("llama.dll", "ggml.dll", "ggml-base.dll", "libomp.dll")
 
 REGISTRY = {
@@ -144,19 +147,65 @@ class JevStyleModelManager:
     """Find and integrity-check the local Jev-Style decision models."""
 
     def __init__(self, root: Path | None = None) -> None:
-        self.root = root or project_root() / "models" / "jev-style"
+        self.searched: list[Path] = []
+        self.explicit_root = root is not None
+        self.root = Path(root) if root else next(
+            (candidate / "models" / "jev-style" for candidate in self._candidate_roots()
+             if (candidate / "models" / "jev-style").is_dir()),
+            project_root() / "models" / "jev-style",
+        )
         # models/jev-style -> models -> project root (keeps tests with a tmp root working)
         self.project_root = self.root.parents[1] if len(self.root.parents) > 1 else project_root()
+
+    def _candidate_roots(self) -> list[Path]:
+        """Directories that can hold the unpacked offline bundle.
+
+        The bundle is extracted once and can be run from anywhere: PIISCAN_HOME is the
+        explicit override, then the source tree, the current directory, the folder that
+        contains the executable, and the PyInstaller temp directory of a frozen EXE
+        (where --add-data models/runtime are unpacked at start-up).
+        """
+        roots: list[Path] = []
+        env_home = os.environ.get("PIISCAN_HOME", "")
+        if env_home:
+            roots.append(Path(env_home).resolve())
+        for candidate in (project_root(), Path.cwd(), Path(sys.argv[0]).resolve().parent):
+            if candidate not in roots:
+                roots.append(candidate)
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            frozen = Path(meipass)
+            if frozen not in roots:
+                roots.append(frozen)
+        return roots
+
+    def _runtime_roots(self) -> list[Path]:
+        """Directories that can legitimately hold the pre-built scorer runtime."""
+        if self.explicit_root:
+            # A caller that names the bundle explicitly means that bundle only.
+            return [self.project_root]
+        roots = list(self._candidate_roots())
+        for candidate in (self.project_root, self.root):
+            if candidate not in roots:
+                roots.append(candidate)
+        return roots
 
     def _scorer_candidates(self, directory: Path, meta: dict) -> list[Path]:
         """Platform-aware scorer search. Windows ships `*.exe` beside llama.dll."""
         candidates: list[Path] = []
         if IS_WINDOWS:
+            # The model release folder may contain a locally built exe, but the offline
+            # bundle ships the scorer only in runtime\windows (the model zips carry the
+            # GGUF, not the binaries), so the runtime folder is the primary home.
             candidates.append(directory / "build" / f"{meta['scorer_bin']}.exe")
-            # pre-built offline Windows runtime (runtime/windows/jev-score.exe)
-            candidates.append(self.project_root / WINDOWS_RUNTIME_DIR / f"{meta['scorer_bin']}.exe")
+            for root in self._runtime_roots():
+                for relative in (WINDOWS_RUNTIME_DIR, NATIVE_BUILD_DIR):
+                    path = root / relative / f"{meta['scorer_bin']}.exe"
+                    if path not in candidates:
+                        candidates.append(path)
         else:
             candidates.append(directory / "build" / meta["scorer_bin"])
+        self.searched = [path.parent for path in candidates]
         return candidates
 
     def _native_libs_ok(self, scorer: Path) -> list[str]:
@@ -222,7 +271,15 @@ class JevStyleModelManager:
             if not (directory / "readout_config.json").is_file():
                 problems.append("readout_config.json missing (calibrated temperatures unavailable)")
             if scorer is None:
-                problems.append(f"scorer binary '{meta['scorer_bin']}' not built (run build_jev_score.sh)")
+                if IS_WINDOWS:
+                    tried = ", ".join(str(path) for path in self.searched) or "no runtime directory"
+                    problems.append(
+                        f"scorer binary '{meta['scorer_bin']}.exe' not found (searched: {tried}); "
+                        "unpack runtime\\windows from the bundle, or build it with "
+                        "scripts\\windows\\build-jev-score.ps1"
+                    )
+                else:
+                    problems.append(f"scorer binary '{meta['scorer_bin']}' not built (run build_jev_score.sh)")
             else:
                 for dll in self._native_libs_ok(scorer):
                     problems.append(f"scorer {scorer.name} missing native library {dll}")

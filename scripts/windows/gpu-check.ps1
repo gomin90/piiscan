@@ -170,7 +170,13 @@ if ($capParts.Count -ge 2) {
 
 Write-Host "=== 7. What the scorer actually reports (the only real success test) ==="
 $exe = Join-Path $runtime $Scorer
-if (-not (Test-Path -LiteralPath $exe)) { Write-Host "  $Scorer not found in $runtime"; exit 1 }
+if (-not (Test-Path -LiteralPath $exe)) {
+    Write-Host "  $Scorer not found in $runtime"
+    Write-Host "  The app looks for the scorer in models\jev-style\<release>\build and in runtime\windows"
+    Write-Host "  (next to the app, the current folder, or the built EXE). If it is not there, the bundle"
+    Write-Host "  is incomplete: re-extract piiscan-app.zip, or build it with scripts\windows\build-jev-score.ps1"
+    exit 1
+}
 if (-not (Test-Path -LiteralPath $Model)) {
     Write-Host "  model file not found: $Model"
     Write-Host "  pass -Model models\jev-style\2b-v4\Jev-Style-2B-Decision-v4-Q4_K_M.gguf"

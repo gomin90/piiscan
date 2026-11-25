@@ -58,8 +58,13 @@ foreach ($pair in @(
         Write-Host "ERROR: MSVC build of $($pair.out) failed. Report the compiler output."
         exit 1
     }
+    # The app finds the scorer in runtime\windows, where the llama.cpp DLLs already sit.
+    # Copy it there so llama.cpp can load its backends from the exe's own directory.
+    $dest = Join-Path $root "runtime\windows\$($pair.out)"
+    Copy-Item -LiteralPath $obj -Destination $dest -Force
     Write-Host ("  built {0}  sha256={1}" -f $obj,
         (Get-FileHash -LiteralPath $obj -Algorithm SHA256).Hash.ToLower())
+    Write-Host "  copied to $dest (the app looks here)"
 }
 
 Write-Host "Native scorer built. Re-run scripts\windows\verify-offline-bundle.ps1 and record the new hashes."

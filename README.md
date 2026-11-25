@@ -150,7 +150,7 @@ piiscan-model-0.8b.zip   0.8B v3 GGUF + tokenizer
 piiscan-model-2b.zip     2B v4 GGUF + tokenizer
 ```
 
-Published at [release v0.7.2](https://github.com/gomin90/piiscan/releases/tag/v0.7.2).
+Published at [release v0.7.3](https://github.com/gomin90/piiscan/releases/tag/v0.7.3).
 GPU inference on Windows is not enabled by the bundle alone: run
 `scripts\windows\install-cuda-backend.ps1`, which extracts the matching CUDA backend
 (and its cuBLAS DLLs) from the vendored zips into `runtime\windows` - no internet needed.

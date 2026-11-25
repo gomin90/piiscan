@@ -145,6 +145,35 @@ If the install succeeded but the app still says "ggml-cuda.dll 설치해야 함"
 | `ggml-cuda.dll needs cublas64_13.dll ...` | CUDA toolkit missing: install CUDA 13.3 then re-run `install-cuda-backend.ps1`, or `fetch-cuda-backend.ps1 -CudaVersion 13.5` |
 | `GPU is sm_120 but the backend has kernels only for sm_50..sm_90` | wrong asset: `install-cuda-backend.ps1 -CudaVersion 13.5` |
 
+### If the AI layer never runs ("AI 판단 0회", "scorer not built")
+
+`ai_audit.attempts == 0` means the Jev-Style engine never loaded, and the report's
+`ai.skipped_reason` says why. The usual cause on Windows is that the scorer binary is
+not where the app looks for it: `models\jev-style\<release>\build\jev-score-v2.exe` or
+`runtime\windows\jev-score-v2.exe`. The model zips (`piiscan-model-0.8b.zip`,
+`piiscan-model-2b.zip`) carry the GGUF and the C source only - the pre-built scorer and
+its llama.cpp DLLs are inside `piiscan-app.zip`'s `runtime\windows`, so extracting only
+the model zip leaves the AI layer without a scorer.
+
+Discovery looks for `runtime\windows` next to the source tree, the current directory,
+the executable that is running, the PyInstaller temp directory of a frozen EXE, and
+`PIISCAN_HOME` if you set it. Set it when the bundle lives somewhere else:
+
+```powershell
+set PIISCAN_HOME=C:\piiscan
+scripts\windows\run.bat --file samples\windows_sample.csv --debug
+```
+
+If the scorer is genuinely absent, either re-extract `piiscan-app.zip` or build it:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\build-jev-score.ps1
+```
+
+which now copies the MSVC-built `jev-score.exe` / `jev-score-v2.exe` into
+`runtime\windows` beside the llama.cpp DLLs. `gpu-check.ps1` section 7 checks the same
+files and tells you when they are missing.
+
 ### Why "GPU 있음에도 CPU 추론" happens
 
 Four separate things must all be true. The app now reports each one in the

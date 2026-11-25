@@ -186,7 +186,8 @@ class MetadataService:
             audit["skipped_reason"] = "max_ai_column_reviews=0 (AI 검토 비활성화)"
             return audit
         if self.llm is None or not self.llm.load():
-            audit["skipped_reason"] = "Jev-Style 모델/Scorer 없음 - 규칙 결과만 사용"
+            detail = (getattr(self.llm, "skipped_reason", "") if self.llm else "") or "모델/Scorer 없음"
+            audit["skipped_reason"] = f"Jev-Style AI 사용 불가 ({detail}) - 규칙 결과만 사용"
             return audit
         started = time.perf_counter()
         for meta in candidates[:budget]:
