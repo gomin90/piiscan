@@ -40,8 +40,15 @@ class PassportDetector(Detector):
             return Match(self.type_key, self.display_name, 0.9,
                         evidence="한국 여권번호 형식", priority=self.priority, sensitivity=self.sensitivity)
         if GENERIC_RE.match(v) and len(digits_only(v)) >= 6:
-            return Match(self.type_key, self.display_name, 0.7,
-                        evidence="국가별 여권번호 형식", priority=self.priority, sensitivity=self.sensitivity)
+            # A generic letter+digits run matches many internal record keys. It is
+            # only evidence of a passport when the column meaning is unambiguous
+            # (spec §3: PASSPORT is otherwise an AI-review case).
+            hinted = self.column_affinity(column_name) >= 0.60
+            return Match(self.type_key, self.display_name, 0.75 if hinted else 0.6,
+                         evidence="국가별 여권번호 형식" if hinted
+                         else "여권번호와 유사한 형식 (원천 확인 필요)",
+                         priority=self.priority, sensitivity=self.sensitivity,
+                         confirmed=hinted)
         if "PASSPORT" in v:
             return Match(self.type_key, self.display_name, 0.6,
                         evidence="값에 PASSPORT 표기", priority=self.priority, sensitivity=self.sensitivity)

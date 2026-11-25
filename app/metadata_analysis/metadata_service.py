@@ -110,7 +110,7 @@ class MetadataService:
 
         ambiguous: list[ColumnMetadata] = []
         batch: list[tuple] = []
-        for _row_index, row in loader.iter_rows():
+        for _row_index, row, _line_start, _line_end in loader.iter_rows():
             if should_stop is not None and should_stop():
                 break
             try:
@@ -176,9 +176,15 @@ class MetadataService:
         self.store._pending_commits += 1
 
     def _apply_ai(self, candidates: list[ColumnMetadata]) -> dict:
-        """Judge the columns the rules could not settle with the local model."""
-        audit = {"candidates": len(candidates), "attempted": 0, "success": 0, "failed": 0,
-                 "skipped_reason": ""}
+        """Judge the columns the rules could not settle with the local model.
+
+        Metadata analysis repeats the same column across thousands of rows of the
+        same schema, so an identical column state is judged once and reused: the
+        budget counts real inference, not lookups, which keeps a 5,000-row
+        extraction well inside its time budget.
+        """
+        audit = {"candidates": len(candidates), "attempted": 0, "reused": 0, "success": 0,
+                 "failed": 0, "skipped_reason": ""}
         if not candidates:
             return audit
         budget = max(0, self.config.max_ai_column_reviews)
@@ -189,26 +195,46 @@ class MetadataService:
             audit["skipped_reason"] = "Jev-Style 모델/Scorer 없음 - 규칙 결과만 사용"
             return audit
         started = time.perf_counter()
-        for meta in candidates[:budget]:
+        reuse_cache: dict[tuple, dict] = {}
+        for meta in candidates:
             verdict = self.columns.get((meta.table, meta.column))
             if verdict is None:
                 continue
-            state = {
-                "schema": meta.schema or "-",
-                "table": meta.table or "-",
-                "column": meta.column,
-                "column_type": meta.data_type or "TEXT",
-                "column_comment": (meta.comment or "-")[:120],
-                "column_length": meta.length if meta.length is not None else -1,
-                "primary_key": int(meta.primary_key),
-                "foreign_key": int(meta.foreign_key),
-                "sample_count": 0,
-                "masked_samples": [],
-            }
-            result = self.llm.classify_metadata(state)
-            audit["attempted"] += 1
+            signature = (
+                meta.column.casefold(),
+                (meta.data_type or "TEXT").casefold(),
+                (meta.comment or "-")[:120].casefold(),
+                meta.length if meta.length is not None else -1,
+                int(meta.primary_key),
+                int(meta.foreign_key),
+            )
+            result = reuse_cache.get(signature) if self.config.ai_context_reuse else None
+            if result is not None:
+                audit["reused"] += 1
+            else:
+                if audit["attempted"] >= budget:
+                    audit["skipped_reason"] = (
+                        f"AI 후보 {len(candidates)}건 중 {budget}건만 inference (나머지는 budget 제한)"
+                    )
+                    break
+                state = {
+                    "schema": meta.schema or "-",
+                    "table": meta.table or "-",
+                    "column": meta.column,
+                    "column_type": meta.data_type or "TEXT",
+                    "column_comment": (meta.comment or "-")[:120],
+                    "column_length": meta.length if meta.length is not None else -1,
+                    "primary_key": int(meta.primary_key),
+                    "foreign_key": int(meta.foreign_key),
+                    "sample_count": 0,
+                    "masked_samples": [],
+                }
+                result = self.llm.classify_metadata(state)
+                audit["attempted"] += 1
+                if result.get("ok"):
+                    reuse_cache[signature] = result
+                audit["success"] += 1 if result.get("ok") else 0
             if result.get("ok"):
-                audit["success"] += 1
                 verdict.verdict = result["verdict"]
                 verdict.relevance = max(verdict.relevance, result["relevance"])
                 verdict.method = "규칙+AI"
@@ -219,8 +245,6 @@ class MetadataService:
                 # An AI failure never turns "검토 필요" into "비개인정보": the
                 # column stays unresolved and the reason is recorded.
                 verdict.rationale.append(f"AI 판정 실패: {result.get('error', '오류')}")
-        if len(candidates) > budget:
-            audit["skipped_reason"] = f"AI 후보 {len(candidates)}건 중 {budget}건만 검토"
         self.ai_seconds = time.perf_counter() - started
         return audit
 

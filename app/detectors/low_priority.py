@@ -13,7 +13,10 @@ from app.detectors.base import (
 import re
 
 SN_RE = re.compile(r"^[A-Z0-9]{4,24}$")
-POSTCODE_KR = re.compile(r"^\d{5}$|^\d{3}[ -]\d{3}$|^\d{7}$")
+# Korean postcodes are 5 digits, or the pre-1998 3+2 form. "010-100" is a
+# truncated mobile number (010 is the mobile prefix), not a postcode.
+POSTCODE_KR = re.compile(r"^\d{5}$|^\d{3}[ -]\d{2}$|^\d{7}$")
+PHONE_SHAPED_POSTCODE = re.compile(r"^010[ -]\d{3}$")
 POSTCODE_GENERIC = re.compile(r"^[A-Z]{1,2}\d{1,4}([ -]\d[A-Z]{2})?$|^\d{5,6}$")
 
 
@@ -36,6 +39,13 @@ class SerialNumberDetector(Detector):
             letters = sum(ch.isalpha() for ch in v)
             digits = sum(ch.isdigit() for ch in v)
             if SN_RE.fullmatch(v) and len(v) >= 6 and letters >= 2 and digits >= 2:
+                # A letter-prefixed numeric serial ("SN0000791900") in a serial
+                # column is specific enough to confirm; a mixed alphanumerics run
+                # without column support is not.
+                if hinted and re.fullmatch(r"[A-Z]{1,4}\d{6,14}", v):
+                    return Match(self.type_key, self.display_name, 0.72,
+                                 evidence="시리얼 접두사 + 숫자 serial",
+                                 priority=self.priority, sensitivity=self.sensitivity)
                 return Match(self.type_key, self.display_name, 0.6 if hinted else 0.5,
                              evidence="시리얼/Serial 패턴", priority=self.priority, sensitivity=self.sensitivity)
             return None
@@ -104,7 +114,7 @@ class PostcodeDetector(Detector):
     display_name = "Postcode"
     priority = 2
     sensitivity = 0.3
-    candidate_tags = frozenset({"digits", "digits_sep", "latin"})
+    candidate_tags = frozenset({"digits", "digits_sep", "latin", "alnum", "separated"})
     name_hints = ("POST", "ZIP", "우편", "PCODE")
     negative_hints = ("AMOUNT", "PRICE", "TOTAL", "QTY", "COUNT", "SEQ", "IDX", "BALANCE", "SUM", "金额")
 
@@ -114,9 +124,19 @@ class PostcodeDetector(Detector):
             # A numeric amount/counter column is not a postcode column, however
             # five digits long its values happen to be.
             return None
+        if PHONE_SHAPED_POSTCODE.match(v):
+            return None
         if POSTCODE_KR.fullmatch(v):
             return Match(self.type_key, self.display_name, 0.8,
                         evidence="우편번호 형식", priority=self.priority, sensitivity=self.sensitivity)
+        if re.fullmatch(r"\d{3}[ -]\d{3}", v):
+            # 3+3 is the legacy/overseas postcode layout. A column that actually
+            # names a postcode makes it confirmable; elsewhere it stays a review.
+            confidence = 0.72 if self.column_affinity(column_name) >= 0.35 else 0.60
+            return Match(self.type_key, self.display_name, confidence,
+                         confirmed=confidence >= 0.70,
+                         evidence="3+3 postcode 형식 (구형/해외)",
+                         priority=self.priority, sensitivity=self.sensitivity)
         if POSTCODE_GENERIC.fullmatch(v) and len(v) >= 4:
             # Bare 6-digit runs are usually YYMMDD dates or IDs, not postcodes.
             if v.isdigit() and len(v) == 6:

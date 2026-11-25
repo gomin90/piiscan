@@ -6,9 +6,14 @@
 """
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 
 from app.detectors.base import Detector, Match, ValueProfile
+from app.config.settings import project_root
+
+RULES_PATH = project_root() / "resources" / "rules" / "custom_patterns.json"
 
 DEFAULT_RULES = [
     {
@@ -74,37 +79,64 @@ def build_regex(rule: dict) -> re.Pattern:
     return re.compile(f"^(?:{body}){suffix}$")
 
 
+def load_custom_rules(path: Path | None = None) -> list[dict]:
+    """Read the shipped custom-ID rules; fall back to the built-in set."""
+    target = path or RULES_PATH
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return list(DEFAULT_RULES)
+    rules = raw.get("custom_rules") if isinstance(raw, dict) else None
+    return list(rules) if rules else list(DEFAULT_RULES)
+
+
 class CustomIdentifierDetector(Detector):
     type_key = "CUSTOM_IDENTIFIER"
     display_name = "사용자 정의 ID"
     priority = 1
     sensitivity = 0.5
-    candidate_tags = frozenset({"latin", "digits", "dot_token"})
+    candidate_tags = frozenset({"latin", "digits", "dot_token", "alnum", "separated", "long_text", "blob"})
     name_hints = ()
 
     def __init__(self, rules: list[dict] | None = None):
+        if rules is None:
+            rules = load_custom_rules()
         self.rules = []
-        for rule in (rules or DEFAULT_RULES):
+        # Flatten every rule once: the scan loop runs this detector on every Cell,
+        # so per-Cell dict lookups and tuple rebuilding are pure overhead.
+        for rule in rules:
             try:
-                self.rules.append({**rule, "regex": build_regex(rule)})
+                compiled = build_regex(rule)
             except re.error:
                 continue
+            self.rules.append((
+                int(rule.get("max_len", 20)),
+                bool(rule.get("require_alpha")),
+                tuple(s.lower() for s in rule.get("exclude_suffixes", ())),
+                compiled,
+                rule.get("type", self.type_key),
+                rule.get("display_name", self.display_name),
+                rule.get("id", ""),
+                float(rule.get("sensitivity", 0.5)),
+            ))
 
     def match(self, value: str, profile: ValueProfile, column_name: str = "") -> Match | None:
         v = value.strip()
         if not v or len(v) > 40:
             return None
-        for rule in self.rules:
-            max_len = int(rule.get("max_len", 20))
-            if len(v) > max_len:
+        length = len(v)
+        lower = None
+        for max_len, require_alpha, excluded, regex, type_key, display, rule_id, sensitivity in self.rules:
+            if length > max_len:
                 continue
-            if rule.get("require_alpha") and not any(ch.isalpha() for ch in v):
+            if require_alpha and not profile.alpha:
                 continue
-            excluded = tuple(s.lower() for s in rule.get("exclude_suffixes", ()))
-            if excluded and v.lower().endswith(excluded):
-                continue
-            if rule["regex"].fullmatch(v):
-                return Match(rule.get("type", self.type_key), rule.get("display_name", self.display_name),
-                             0.8, evidence=f"사용자 정의 규칙 {rule.get('id')}",
-                             priority=self.priority, sensitivity=float(rule.get("sensitivity", 0.5)))
+            if excluded:
+                if lower is None:
+                    lower = v.lower()
+                if lower.endswith(excluded):
+                    continue
+            if regex.fullmatch(v):
+                return Match(type_key, display, 0.8, evidence=f"사용자 정의 규칙 {rule_id}",
+                             priority=self.priority, sensitivity=sensitivity)
         return None

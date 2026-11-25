@@ -10,6 +10,8 @@ PERSONAL / NOT_PERSONAL; gold_types uses the detector type keys.
 """
 from __future__ import annotations
 
+from tests.fixtures.gold_generated import cases as generated_cases
+
 COLUMNS = [
     "SEQ_NO",          # user-declared KEY
     "CUSTOMER_NAME",
@@ -38,6 +40,24 @@ COLUMNS = [
     "CLIENT_IP",
     "POSTCODE",
     "DEVICE_SN",
+    # Policy/2순위 columns added for the 2026 classification: these exercise the
+    # context detectors and the natural-language cases from the spec.
+    "PASSWORD",
+    "CI",
+    "CELL_ID",
+    "RFID_TAG",
+    "SSID",
+    "ACCOUNT_GUID",
+    "FAX_NO",
+    "MARRIAGE_ANNIV",
+    "CHILD_COUNT",
+    "MASKED_FIELD",
+    "SYSTEM_ID",
+    "PROC_CODE",
+    "CIRCLE_NO",
+    "APP_USER",
+    "CART_TOTAL",
+    "SPIN_VALUE",
 ]
 
 # (column, value, gold status, gold types)
@@ -131,7 +151,59 @@ CASES: list[tuple[str, str, str, tuple[str, ...]]] = [
     ("CLIENT_IP", "256.1.1.1", "NOT_PERSONAL", ()),        # invalid IPv4 octet
     ("POSTCODE", "1234567890", "NOT_PERSONAL", ()),        # ten digits: a phone-like run
     ("DEVICE_SN", "0000", "NOT_PERSONAL", ()),             # no letters, no segments
+
+    # --- 1순위 / 2순위 policy columns -------------------------------------------------
+    ("PASSWORD", "123456", "PERSONAL", ("AUTH_CREDENTIAL",)),
+    ("PASSWORD", "Pa$$w0rd!QuerY", "PERSONAL", ("AUTH_CREDENTIAL",)),
+    ("PASSWORD", "0f4c2b9d8e6a1f5b3c7d9e2a4b6c8d0f", "PERSONAL", ("AUTH_CREDENTIAL",)),
+    ("CI", "a1b2c3d4e5f6789012345678", "PERSONAL", ("CI",)),
+    ("CI", "00000000000000000000", "PERSONAL", ("CI",)),
+    ("CELL_ID", "01012345678", "PERSONAL", ("CELL_ID",)),
+    ("CELL_ID", "010-1234-5678", "PERSONAL", ("CELL_ID", "PHONE_NUMBER")),
+    ("RFID_TAG", "E280123456789ABC", "PERSONAL", ("RFID",)),
+    ("SSID", "Office-Wi-Fi-5G", "PERSONAL", ("WIRELESS_NETWORK",)),
+    ("ACCOUNT_GUID", "11013810000000000000000000000001", "PERSONAL", ("ACCOUNT_GUID",)),
+    ("FAX_NO", "02-555-1234", "PERSONAL", ("FAX_NUMBER",)),
+    ("MARRIAGE_ANNIV", "2024-04-02", "PERSONAL", ("PERSONAL_ATTRIBUTE",)),
+    ("CHILD_COUNT", "2", "PERSONAL", ("PERSONAL_ATTRIBUTE",)),
+
+    # --- masking canaries: a masked value must never be cleared, but is not
+    #     a confirmed raw identifier either (spec §12.3 / §12.4) --------------------
+    ("MASKED_FIELD", "***1234***", "MASKED_PERSONAL", ("MASKED",)),
+    ("MASKED_FIELD", "abcd****5678", "MASKED_PERSONAL", ("MASKED",)),
+    ("MASKED_FIELD", "1234****5678", "MASKED_PERSONAL", ("MASKED",)),
+
+    # --- false-positive traps from spec §12.4 --------------------------------------
+    ("SYSTEM_ID", "00000000000000000000000000000001", "NOT_PERSONAL", ()),
+    ("PROC_CODE", "A1000000000000", "NOT_PERSONAL", ()),
+    ("CIRCLE_NO", "98765432109876543210", "NOT_PERSONAL", ()),
+    ("APP_USER", "AP-2026-0001", "NOT_PERSONAL", ()),
+    ("CART_TOTAL", "1234567", "NOT_PERSONAL", ()),
+    ("SPIN_VALUE", "PIN-0000", "NOT_PERSONAL", ()),
+
+    # --- natural language (spec §12.2) ----------------------------------------------
+    ("CONTACT_NOTE", "고객 홍길동의 전화번호는 010-1234-5678이며 이메일은 kim@example.com입니다",
+     "PERSONAL", ("NAME", "PHONE_NUMBER", "EMAIL")),
+    ("CONTACT_NOTE", "김철수의 계좌 1234567890123 payment", "PERSONAL", ("NAME", "BANK_ACCOUNT")),
+    ("REMARKS", "Patient John Smith born 1985-01-01", "PERSONAL", ("NAME", "BIRTH_DATE")),
+    ("REMARKS", "Mac address AA:BB:CC:DD:EE:FF", "PERSONAL", ("MAC",)),
+    ("REMARKS", "Latitude 37.5665 Longitude 126.9780", "PERSONAL", ("LATITUDE", "LONGITUDE")),
+    ("REMARKS", "전화 010-1234-5678 / 이메일 abc@def.com", "PERSONAL", ("PHONE_NUMBER", "EMAIL")),
+    ("REMARKS", "order 12345 shipped to 123 Main Street", "PERSONAL", ("ADDRESS",)),
+    ("REMARKS", "IMSI 310100123456789", "PERSONAL", ("IMSI",)),
+
+    # --- multi-occurrence cells (spec §6) -------------------------------------------
+    ("PHONE", "010-1111-2222, 010-3333-4444", "PERSONAL", ("PHONE_NUMBER",)),
+    ("EMAIL", "alice@example.com; bob@example.org", "PERSONAL", ("EMAIL",)),
+    ("CONTACT_NOTE", "홍길동 010-1234-5678 kim@example.com", "PERSONAL",
+     ("NAME", "PHONE_NUMBER", "EMAIL")),
+    ("INTERNAL_CODE", "{\"user_name\":\"Kim\",\"user_email\":\"kim@test.com\"}", "PERSONAL",
+     ("EMAIL",)),
 ]
+
+
+ALL_CASES = CASES + generated_cases()
+ALL_COLUMNS = list(dict.fromkeys(COLUMNS + [case[0] for case in ALL_CASES]))
 
 
 def build_csv(path) -> list[tuple[int, str]]:
@@ -139,16 +211,16 @@ def build_csv(path) -> list[tuple[int, str]]:
     from collections import defaultdict
     rows: dict[int, dict[str, str]] = defaultdict(dict)
     types: dict[tuple[int, str], tuple[str, tuple[str, ...]]] = {}
-    for index, (column, value, status, gold_types) in enumerate(CASES, start=1):
+    for index, (column, value, status, gold_types) in enumerate(ALL_CASES, start=1):
         # Every case occupies one real CSV row: the KEY column carries the case
         # id so a row that only holds an empty cell is not skipped by the loader.
         rows[index][COLUMNS[0]] = str(index)
         rows[index][column] = value
         types[(index, column)] = (status, gold_types)
-    lines = [",".join(COLUMNS)]
+    lines = [",".join(ALL_COLUMNS)]
     for row_number in range(1, len(rows) + 1):
         cells = []
-        for column in COLUMNS:
+        for column in ALL_COLUMNS:
             value = rows[row_number].get(column, "")
             cells.append('"' + value.replace('"', '""') + '"' if value else "")
         lines.append(",".join(cells))
@@ -159,5 +231,5 @@ def build_csv(path) -> list[tuple[int, str]]:
 def gold_labels() -> dict[tuple[int, str], tuple[str, tuple[str, ...]]]:
     """(row, column) -> (gold status, gold types). All other cells are empty."""
     return {(row, column): (status, kinds)
-            for row, (column, value, status, kinds) in enumerate(CASES, start=1)
+            for row, (column, value, status, kinds) in enumerate(ALL_CASES, start=1)
             if value}

@@ -38,14 +38,17 @@ def mask_value(value: str, keep_head: int = 2, keep_tail: int = 1) -> str:
 
 
 def looks_masked(value: str) -> bool:
-    """True when a value is already redacted (e.g. 010-****-1234, 홍**, abc***)."""
+    """True when a value is already redacted (e.g. 010-****-1234, 홍**, abc***).
+
+    This runs on every evaluated Cell, so the mask characters are counted with
+    C-level `str.count` instead of a per-character Python loop.
+    """
     if not value:
         return False
-    masked = sum(1 for ch in value if ch in MASK_CHARS)
+    masked = sum(value.count(ch) for ch in MASK_CHARS)
     if masked == 0:
         return False
-    core = re.sub(r"\d+", "", value)
-    # A digit-heavy value with a run of mask characters is a redacted identifier.
+    # A value with a run of mask characters is a fragment of something bigger.
     return masked >= 2 or masked >= max(2, len(value) // 4) or ("@" in value and masked >= 3)
 
 

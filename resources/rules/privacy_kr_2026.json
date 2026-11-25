@@ -1,0 +1,825 @@
+{
+  "policy_version": "privacy-kr-2026.1",
+  "source": "개인정보 탐지 정책 (1순위/2순위) - Function A Cell 판정, Function B 메타정보 분류, AI 우선순위, 위험도 계산에서 공통으로 사용",
+  "notes": [
+    "tier는 탐지·AI 검토의 우선순위이지 확정 판정이 아니다.",
+    "risk_level(위험도), sensitivity(민감도), confidence(신뢰도)는 각각独立로 계산되며 tier와 합치지 않는다.",
+    "support는 실제 구현 상태를 표시한다: full(형식+체크섬), context(컬럼/행 문맥), partial(일부 형식), none(미지원)."
+  ],
+  "types": {
+    "RESIDENT_ID": {
+      "display_name_ko": "주민등록번호",
+      "display_name_en": "Resident registration number",
+      "category": "고유식별번호",
+      "tier": 1,
+      "identification": "direct",
+      "method": "regex+checksum",
+      "verdict": "confirm",
+      "sensitivity": 1.0,
+      "support": "full",
+      "column_aliases": [
+        "주민",
+        "주민번호",
+        "RESIDENT",
+        "NATIONAL_ID",
+        "PID"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "INTERNAL",
+        "ORDER",
+        "SEQ",
+        "CODE"
+      ]
+    },
+    "PASSPORT": {
+      "display_name_ko": "여권번호",
+      "display_name_en": "Passport number",
+      "category": "고유식별번호",
+      "tier": 1,
+      "identification": "direct",
+      "method": "regex",
+      "verdict": "confirm",
+      "sensitivity": 0.9,
+      "support": "full",
+      "column_aliases": [
+        "여권",
+        "PASSPORT",
+        "여권번호"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "INTERNAL",
+        "ORDER",
+        "SEQ"
+      ]
+    },
+    "DRIVER_LICENSE": {
+      "display_name_ko": "운전면허번호",
+      "display_name_en": "Driver's licence number",
+      "category": "고유식별번호",
+      "tier": 1,
+      "identification": "direct",
+      "method": "regex",
+      "verdict": "confirm",
+      "sensitivity": 0.9,
+      "support": "full",
+      "column_aliases": [
+        " 운전면허",
+        "DL",
+        "DRIVER",
+        "LICENSE"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "INTERNAL",
+        "ORDER"
+      ]
+    },
+    "FOREIGNER_ID": {
+      "display_name_ko": "외국인등록번호",
+      "display_name_en": "Foreigner registration number",
+      "category": "고유식별번호",
+      "tier": 1,
+      "identification": "direct",
+      "method": "regex",
+      "verdict": "confirm",
+      "sensitivity": 0.9,
+      "support": "full",
+      "column_aliases": [
+        "외국인",
+        "FOREIGNER",
+        "FID"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "INTERNAL",
+        "ORDER"
+      ]
+    },
+    "SOCIAL_SECURITY": {
+      "display_name_ko": "사회보장번호",
+      "display_name_en": "Social security number",
+      "category": "고유식별번호",
+      "tier": 1,
+      "identification": "direct",
+      "method": "regex",
+      "verdict": "review",
+      "sensitivity": 0.95,
+      "support": "full",
+      "column_aliases": [
+        "SSN",
+        "SOCIAL",
+        "사회보장"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "INTERNAL",
+        "ORDER"
+      ]
+    },
+    "INSURANCE_NUMBER": {
+      "display_name_ko": "국가보험번호",
+      "display_name_en": "National insurance number",
+      "category": "고유식별번호",
+      "tier": 1,
+      "identification": "direct",
+      "method": "regex",
+      "verdict": "review",
+      "sensitivity": 0.9,
+      "support": "full",
+      "column_aliases": [
+        "보험",
+        "INSURANCE",
+        "NIN"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "INTERNAL",
+        "ORDER"
+      ]
+    },
+    "BIOMETRIC": {
+      "display_name_ko": "생체인식정보",
+      "display_name_en": "Biometric data",
+      "category": "생체인식정보",
+      "tier": 1,
+      "identification": "direct",
+      "method": "column_context+value_shape",
+      "verdict": "review",
+      "sensitivity": 1.0,
+      "support": "context",
+      "column_aliases": [
+        "지문",
+        "指纹",
+        "FINGERPRINT",
+        "FINGER",
+        "홍채",
+        "IRIS",
+        "얼굴",
+        "FACE",
+        "人脸",
+        "VEIN",
+        "VOICE",
+        "BIOMETRIC",
+        "TEMPLATE"
+      ],
+      "positive_hints": [
+        "template",
+        "vector",
+        "embedding",
+        "feature",
+        "image",
+        "img",
+        "png",
+        "jpg"
+      ],
+      "negative_hints": [
+        "COUNT",
+        "FLAG",
+        "STATUS",
+        "TYPE"
+      ]
+    },
+    "CARD_NUMBER": {
+      "display_name_ko": "카드번호",
+      "display_name_en": "Card number",
+      "category": "금융정보",
+      "tier": 1,
+      "identification": "direct",
+      "method": "regex+luhn",
+      "verdict": "confirm",
+      "sensitivity": 0.95,
+      "support": "full",
+      "column_aliases": [
+        "카드",
+        "CARD",
+        "Credit"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "IMEI",
+        "DEVICE",
+        "TERMINAL",
+        "SUBSCRIBER"
+      ]
+    },
+    "BANK_ACCOUNT": {
+      "display_name_ko": "계좌번호",
+      "display_name_en": "Bank account number",
+      "category": "금융정보",
+      "tier": 1,
+      "identification": "direct",
+      "method": "regex+checksum",
+      "verdict": "confirm",
+      "sensitivity": 0.95,
+      "support": "full",
+      "column_aliases": [
+        "계좌",
+        "ACCT",
+        "ACCOUNT"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "IMEI",
+        "DEVICE"
+      ]
+    },
+    "LOCATION": {
+      "display_name_ko": "위도/경도",
+      "display_name_en": "GPS coordinates",
+      "category": "위치정보",
+      "tier": 1,
+      "identification": "combined",
+      "method": "value_shape+column_context",
+      "verdict": "confirm",
+      "sensitivity": 0.8,
+      "support": "full",
+      "column_aliases": [
+        "위도",
+        "경도",
+        "LAT",
+        "LNG",
+        "LON",
+        "GPS",
+        "COORD",
+        "坐"
+      ],
+      "positive_hints": [
+        "gps",
+        "lat",
+        "lng",
+        "lon"
+      ],
+      "negative_hints": []
+    },
+    "CELL_ID": {
+      "display_name_ko": "통신 기지국/CELL ID",
+      "display_name_en": "Cell tower / base station identifier",
+      "category": "위치정보",
+      "tier": 1,
+      "identification": "combined",
+      "method": "column_context+value_shape",
+      "verdict": "review",
+      "sensitivity": 0.7,
+      "support": "context",
+      "column_aliases": [
+        "CELL",
+        "기지국",
+        "BASE",
+        "BTS",
+        "SECTOR",
+        "ACCEP",
+        "小区",
+        "BASEStation"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "CELL_COUNT",
+        "PACKAGE"
+      ]
+    },
+    "RFID": {
+      "display_name_ko": "RFID 태그 ID",
+      "display_name_en": "RFID tag identifier",
+      "category": "위치정보",
+      "tier": 1,
+      "identification": "combined",
+      "method": "column_context+value_shape",
+      "verdict": "review",
+      "sensitivity": 0.7,
+      "support": "context",
+      "column_aliases": [
+        "RFID",
+        "TAG",
+        "EPC",
+        "NUC"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "TAG_COUNT",
+        "HASHTAG"
+      ]
+    },
+    "WIRELESS_NETWORK": {
+      "display_name_ko": "무선통신망 정보",
+      "display_name_en": "Wireless network identifier (SSID/BSSID)",
+      "category": "위치정보",
+      "tier": 1,
+      "identification": "combined",
+      "method": "column_context+value_shape",
+      "verdict": "review",
+      "sensitivity": 0.6,
+      "support": "context",
+      "column_aliases": [
+        "SSID",
+        "BSSID",
+        "WLAN",
+        "WI-Fi",
+        "WIFI",
+        "AP",
+        "NETWORK_NAME"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "NETWORK_TYPE_FLAG"
+      ]
+    },
+    "AUTH_CREDENTIAL": {
+      "display_name_ko": "인증정보(비밀번호/PIN)",
+      "display_name_en": "Authentication credential",
+      "category": "인증정보",
+      "tier": 1,
+      "identification": "direct",
+      "method": "column_context+value_shape",
+      "verdict": "review",
+      "sensitivity": 0.9,
+      "support": "context",
+      "column_aliases": [
+        "PASSWORD",
+        "PASSWD",
+        "PWD",
+        "PASSPHRASE",
+        "PIN",
+        "AUTH",
+        "SECRET",
+        "TOKEN",
+        "비밀번호",
+        "패스워드",
+        "인증"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "TOKEN_COUNT",
+        "AUTH_STATUS"
+      ]
+    },
+    "CI": {
+      "display_name_ko": "연계정보(CI)",
+      "display_name_en": "Customer linkage information",
+      "category": "연계정보",
+      "tier": 1,
+      "identification": "direct",
+      "method": "column_context+value_shape",
+      "verdict": "review",
+      "sensitivity": 0.85,
+      "support": "context",
+      "column_aliases": [
+        "CI",
+        "연계",
+        "LINKAGE",
+        "LINK_ID",
+        "CIG",
+        "LINKAGE_ID",
+        "CUSTOMER_LINK"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "CIRCLE",
+        "CID",
+        "CITY",
+        "COMPANY"
+      ]
+    },
+    "NAME": {
+      "display_name_ko": "이름",
+      "display_name_en": "Person name",
+      "category": "고객·임직원 정보",
+      "tier": 1,
+      "identification": "combined",
+      "method": "regex+column_context+ai",
+      "verdict": "review",
+      "sensitivity": 0.7,
+      "support": "full",
+      "column_aliases": [
+        "NAME",
+        "이름",
+        "성명",
+        "姓名",
+        "CUSTOMER",
+        "CUST",
+        "회원",
+        "PATIENT",
+        "USER",
+        "EMP",
+        "員工",
+        "受体",
+        "신청자",
+        "담당자",
+        "수령인",
+        "FAMILY"
+      ],
+      "positive_hints": [
+        "customer",
+        "person",
+        "patient",
+        "user",
+        "employee",
+        "staff",
+        "applicant",
+        "receiver"
+      ],
+      "negative_hints": [
+        "PRODUCT",
+        "GOODS",
+        "ITEM",
+        "MODEL",
+        "BRAND",
+        "DEPT",
+        "DEPARTMENT",
+        "TEAM",
+        "STORE",
+        "GROUP",
+        "TITLE",
+        "CATEGORY",
+        "부",
+        "팀",
+        "점"
+      ]
+    },
+    "EMAIL": {
+      "display_name_ko": "이메일",
+      "display_name_en": "Email address",
+      "category": "고객·임직원 정보",
+      "tier": 1,
+      "identification": "direct",
+      "method": "regex",
+      "verdict": "confirm",
+      "sensitivity": 0.75,
+      "support": "full",
+      "column_aliases": [
+        "EMAIL",
+        "이메일",
+        "_mail",
+        "E_MAIL"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "DOMAIN"
+      ]
+    },
+    "PHONE_NUMBER": {
+      "display_name_ko": "전화번호",
+      "display_name_en": "Phone number",
+      "category": "고객·임직원 정보",
+      "tier": 1,
+      "identification": "direct",
+      "method": "regex",
+      "verdict": "confirm",
+      "sensitivity": 0.75,
+      "support": "full",
+      "column_aliases": [
+        "PHONE",
+        "TEL",
+        "MOBILE",
+        "HANDPHONE",
+        "전화",
+        "手机",
+        "Tel No"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "CITY_CODE"
+      ]
+    },
+    "FAX_NUMBER": {
+      "display_name_ko": "팩스번호",
+      "display_name_en": "Fax number",
+      "category": "고객·임직원 정보",
+      "tier": 1,
+      "identification": "combined",
+      "method": "regex+column_context",
+      "verdict": "review",
+      "sensitivity": 0.6,
+      "support": "full",
+      "column_aliases": [
+        "FAX",
+        "팩스",
+        "Facsimile"
+      ],
+      "positive_hints": [],
+      "negative_hints": []
+    },
+    "ADDRESS": {
+      "display_name_ko": "상세주소",
+      "display_name_en": "Detailed address",
+      "category": "고객·임직원 정보",
+      "tier": 1,
+      "identification": "combined",
+      "method": "regex+column_context",
+      "verdict": "confirm",
+      "sensitivity": 0.7,
+      "support": "full",
+      "column_aliases": [
+        "ADDRESS",
+        "ADDR",
+        "주소",
+        "地址",
+        "SHIP",
+        "DELIVERY"
+      ],
+      "positive_hints": [],
+      "negative_hints": []
+    },
+    "BIRTH_DATE": {
+      "display_name_ko": "생년월일",
+      "display_name_en": "Date of birth",
+      "category": "고객·임직원 정보",
+      "tier": 1,
+      "identification": "combined",
+      "method": "regex+column_context",
+      "verdict": "confirm",
+      "sensitivity": 0.7,
+      "support": "full",
+      "column_aliases": [
+        "BIRTH",
+        "DOB",
+        "생년",
+        "출생",
+        "生日",
+        "出生"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "EVENT",
+        "ORDER",
+        "CREATE",
+        "UPDATE"
+      ]
+    },
+    "IMEI": {
+      "display_name_ko": "IMEI",
+      "display_name_en": "IMEI",
+      "category": "단말기·통신 식별정보",
+      "tier": 1,
+      "identification": "combined",
+      "method": "regex+luhn",
+      "verdict": "confirm",
+      "sensitivity": 0.7,
+      "support": "full",
+      "column_aliases": [
+        "IMEI",
+        "TERMINAL",
+        "SUBSCRIBER"
+      ],
+      "positive_hints": [],
+      "negative_hints": []
+    },
+    "IMSI": {
+      "display_name_ko": "IMSI",
+      "display_name_en": "IMSI",
+      "category": "단말기·통신 식별정보",
+      "tier": 1,
+      "identification": "combined",
+      "method": "regex",
+      "verdict": "confirm",
+      "sensitivity": 0.7,
+      "support": "full",
+      "column_aliases": [
+        "IMSI"
+      ],
+      "positive_hints": [],
+      "negative_hints": []
+    },
+    "PERSONAL_ATTRIBUTE": {
+      "display_name_ko": "고객 속성 정보",
+      "display_name_en": "Identifiable customer attribute",
+      "category": "고객·임직원 속성정보",
+      "tier": 2,
+      "identification": "combined",
+      "method": "column_context+value_shape",
+      "verdict": "review",
+      "sensitivity": 0.45,
+      "support": "context",
+      "column_aliases": [
+        "MARRIAGE",
+        "결혼",
+        "CHILD",
+        "자녀",
+        "ANNIVERSARY",
+        "MARITAL",
+        "가족",
+        "FAMILY_COUNT",
+        "BLOOD",
+        "blood",
+        "HEIGHT",
+        "WEIGHT",
+        "AGE",
+        "키",
+        "몸무게",
+        "혈형"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "PRODUCT",
+        "GROUP"
+      ]
+    },
+    "ACCOUNT_GUID": {
+      "display_name_ko": "ACCOUNT GUID",
+      "display_name_en": "Account GUID",
+      "category": "고객 식별정보",
+      "tier": 2,
+      "identification": "combined",
+      "method": "regex+column_context",
+      "verdict": "review",
+      "sensitivity": 0.5,
+      "support": "full",
+      "column_aliases": [
+        "GUID",
+        "ACCOUNT_GUID",
+        "ACCOUNT_ID",
+        "GAID",
+        "PSID",
+        "KNOX"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "ORDER",
+        "SEQ"
+      ]
+    },
+    "GAID": {
+      "display_name_ko": "GAID(구글 광고 ID)",
+      "display_name_en": "Google Advertising ID",
+      "category": "고객 식별정보",
+      "tier": 2,
+      "identification": "combined",
+      "method": "column_context+uuid_shape",
+      "verdict": "review",
+      "sensitivity": 0.55,
+      "support": "context",
+      "column_aliases": [
+        "GAID",
+        "ADVERTISING",
+        "AD_ID",
+        "광고"
+      ],
+      "positive_hints": [],
+      "negative_hints": []
+    },
+    "SN": {
+      "display_name_ko": "Serial Number",
+      "display_name_en": "Serial number",
+      "category": "단말기 식별정보",
+      "tier": 2,
+      "identification": "combined",
+      "method": "regex+column_context",
+      "verdict": "review",
+      "sensitivity": 0.45,
+      "support": "full",
+      "column_aliases": [
+        "SN",
+        "SERIAL",
+        "DUID"
+      ],
+      "positive_hints": [],
+      "negative_hints": []
+    },
+    "UUID": {
+      "display_name_ko": "UUID",
+      "display_name_en": "UUID",
+      "category": "단말기·고객 식별정보",
+      "tier": 2,
+      "identification": "combined",
+      "method": "regex+column_context",
+      "verdict": "review",
+      "sensitivity": 0.45,
+      "support": "full",
+      "column_aliases": [
+        "UUID",
+        "GUID"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "ORDER",
+        "BATCH",
+        "TASK"
+      ]
+    },
+    "MAC": {
+      "display_name_ko": "MAC 주소",
+      "display_name_en": "MAC address",
+      "category": "단말기 식별정보",
+      "tier": 2,
+      "identification": "combined",
+      "method": "regex",
+      "verdict": "review",
+      "sensitivity": 0.45,
+      "support": "full",
+      "column_aliases": [
+        "MAC"
+      ],
+      "positive_hints": [],
+      "negative_hints": []
+    },
+    "IP": {
+      "display_name_ko": "IP 주소",
+      "display_name_en": "IP address",
+      "category": "단말기·network 식별정보",
+      "tier": 2,
+      "identification": "combined",
+      "method": "regex",
+      "verdict": "review",
+      "sensitivity": 0.45,
+      "support": "full",
+      "column_aliases": [
+        "IP",
+        "HOST"
+      ],
+      "positive_hints": [],
+      "negative_hints": []
+    },
+    "POSTCODE": {
+      "display_name_ko": "우편번호",
+      "display_name_en": "Postcode",
+      "category": "일반 주소정보",
+      "tier": 2,
+      "identification": "combined",
+      "method": "regex+column_context",
+      "verdict": "review",
+      "sensitivity": 0.35,
+      "support": "full",
+      "column_aliases": [
+        "POSTCODE",
+        "ZIP",
+        "POST",
+        "우편"
+      ],
+      "positive_hints": [],
+      "negative_hints": []
+    },
+    "PAYMENT_INFO": {
+      "display_name_ko": "결제·멤버십 정보",
+      "display_name_en": "Payment / membership information",
+      "category": "기타 금융정보",
+      "tier": 2,
+      "identification": "combined",
+      "method": "column_context+value_shape",
+      "verdict": "review",
+      "sensitivity": 0.5,
+      "support": "context",
+      "column_aliases": [
+        "MEMBERSHIP",
+        "결제",
+        "PAY",
+        "POINT",
+        "积分",
+        "멤버십",
+        "CARD_TYPE",
+        "PIN",
+        "IBAN",
+        "payment"
+      ],
+      "positive_hints": [],
+      "negative_hints": [
+        "PAYMENT_FLAG",
+        "PAY_TYPE"
+      ]
+    },
+    "CUSTOM_IDENTIFIER": {
+      "display_name_ko": "사용자 정의 ID",
+      "display_name_en": "User-defined identifier",
+      "category": "기타 식별정보",
+      "tier": 2,
+      "identification": "combined",
+      "method": "regex(user rules)",
+      "verdict": "review",
+      "sensitivity": 0.55,
+      "support": "full",
+      "risk_step_up": true,
+      "column_aliases": [
+        "MEMBER",
+        "USER",
+        "CUSTOMER_ID",
+        "ID",
+        "KEY",
+        "고객번호",
+        "회원"
+      ],
+      "positive_hints": [],
+      "negative_hints": []
+    },
+    "MASKED": {
+      "display_name_ko": "보호 처리 컬럼",
+      "display_name_en": "Protected column",
+      "category": "보호 처리",
+      "tier": 1,
+      "identification": "n/a",
+      "method": "protection analysis",
+      "verdict": "none",
+      "sensitivity": 0.6,
+      "support": "full",
+      "column_aliases": [
+        "MASK",
+        "MASKED",
+        "보호",
+        "HASH",
+        "ENC",
+        "TRUNC"
+      ],
+      "positive_hints": [],
+      "negative_hints": []
+    }
+  }
+}

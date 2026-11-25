@@ -61,4 +61,4 @@ def test_quoted_newline_rows_are_parsed():
     loader = CsvLoader(settings)
     loader.prepare()
     rows = list(loader.iter_rows())
-    assert any("\n" in "".join(row) for _, row in rows)
+    assert any("\n" in "".join(row) for _, row, _, _ in rows)

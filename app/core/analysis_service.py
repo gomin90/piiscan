@@ -240,13 +240,18 @@ def select_column_candidates(candidates: list[dict], limit: int) -> list[dict]:
     rest = candidates[head:]
     remaining = limit - head
     if remaining and rest:
-        # Uniform spread *including the last candidate*, so data in the right-hand
-        # columns of a wide file is never dropped just because it sorts last.
         if remaining == 1:
             chosen.append(rest[-1])
         else:
-            for index in range(remaining):
-                chosen.append(rest[index * (len(rest) - 1) // (remaining - 1)])
+            # The right-most candidate is always taken: in a wide file the last
+            # columns would otherwise never be sampled no matter how uncertain
+            # their verdict is.
+            rightmost = max(rest, key=lambda item: item["finding"]["index"])
+            chosen.append(rightmost)
+            pool = [item for item in rest if item is not rightmost]
+            slots = remaining - 1
+            for index in range(slots):
+                chosen.append(pool[index * max(1, len(pool) - 1) // max(1, slots - 1)] if slots > 1 else pool[0])
     return chosen
 
 
@@ -274,6 +279,9 @@ def row_context(raw: dict, store, settings: FileSettings) -> dict:
         "table": settings.table,
         "status": raw["status"],
         "basis": raw["basis"],
+        "key_mask": raw.get("key_mask", ""),
+        "line_start": raw.get("line_start") or raw["row"],
+        "line_end": raw.get("line_end") or raw["row"],
         "risk_level": raw["risk_level"],
         "confirmed_types": raw["confirmed_pii"],
         "possible_types": raw["possible_pii"],
@@ -296,15 +304,20 @@ def review_cells(store: DetailStore, llm, columns: list[dict], config: AnalysisC
     """
     cell_audit = {"policy": config.ai_cell_reviews, "limit": config.max_ai_cell_reviews,
                   "candidates": 0, "attempted": 0, "success": 0, "failed": 0,
-                  "skipped": 0, "batches": 0, "reused": 0, "seconds": 0.0}
+                  "skipped": 0, "budget_skipped": 0, "memory_skipped": 0,
+                  "unavailable_skipped": 0, "reused": 0, "context_reused": 0,
+                  "batches": 0, "decisions": 0, "seconds": 0.0,
+                  "inference_seconds": 0.0, "model_load_seconds": 0.0}
     if config.ai_cell_reviews == "none" or config.max_ai_cell_reviews <= 0:
         cell_audit["skipped"] = store.verdict_count() - store.verdict_count(STATUS_EMPTY)
+        cell_audit["budget_skipped"] = cell_audit["skipped"]
         audit["cell"] = cell_audit
         diagnostics.record("ai_cell_review", **cell_audit)
         return
     if llm is None or not hasattr(llm, "judge_cells"):
         cell_audit["skipped"] = store.verdict_count() - store.verdict_count(STATUS_EMPTY)
         cell_audit["failed"] = cell_audit["skipped"]
+        cell_audit["unavailable_skipped"] = cell_audit["skipped"]
         audit["cell"] = cell_audit
         diagnostics.record("ai_cell_review", **cell_audit)
         return
@@ -312,70 +325,106 @@ def review_cells(store: DetailStore, llm, columns: list[dict], config: AnalysisC
     statuses = STATUSES if config.ai_cell_reviews == "all" else AI_PENDING_STATUSES
     statuses = tuple(status for status in statuses if status != STATUS_EMPTY)
     cell_audit["candidates"] = store.candidate_count(statuses)
+    cell_audit["model_load_seconds"] = round(getattr(llm, "load_seconds", 0.0), 3)
     column_by_index = {column["index"]: column for column in columns}
     started = time.perf_counter()
-    batch: list[dict] = []
+    # A batch is keyed by the reuse key so identical Cells in the same batch share
+    # one scorer question instead of one question each.
+    batch: dict[tuple, list[dict]] = {}
     batch_column: int | None = None
-    # A verdict judged for one cell is reusable for another cell only when the
-    # value AND the column context are the same; different columns never share a
-    # verdict even when the value is identical.
-    reuse: dict[tuple[int, str, str], tuple[str, float, str, bool]] = {}
+    # A verdict is reusable only when the value AND the column's semantic signature
+    # AND the context class match. `ai_context_reuse` off forces a fresh inference
+    # for every cell. See spec section 9 (Reused = Cell AI Reuse Count).
+    reuse: dict[tuple, tuple[str, float, str, bool, str]] = {}
+    context_reuse = getattr(config, "ai_context_reuse", True)
+
+    def reuse_key(cell: dict) -> tuple:
+        return (
+            cell.get("masked_value", ""),
+            cell.get("semantic_signature") or cell["column"],
+            cell.get("context_class", ""),
+            cell["rule_verdict"],
+            tuple(cell.get("privacy_types", "").split(",")),
+        )
+
+    def apply_verdict(cell: dict, decision: str, status: str, confidence: float,
+                      method: str, needs_review: bool) -> None:
+        store.set_cell_ai_verdicts([(decision, status, confidence, method, needs_review,
+                                    cell["row"], cell["column_index"])])
 
     def flush() -> None:
         nonlocal batch, batch_column
         if not batch:
             return
-        column = column_by_index.get(batch_column, {"column": batch[0]["column"], "index": batch_column})
-        cell_audit["attempted"] += len(batch)
+        first_group = next(iter(batch.values()))
+        column = column_by_index.get(batch_column,
+                                     {"column": first_group[0]["column"], "index": batch_column})
+        representatives = [group[0] for group in batch.values()]
+        duplicates = sum(len(group) - 1 for group in batch.values())
+        if duplicates:
+            cell_audit["reused"] += duplicates
+            cell_audit["context_reused"] += duplicates
+        cell_audit["attempted"] += len(representatives)
         cell_audit["batches"] += 1
+        call_started = time.perf_counter()
         try:
-            results = llm.judge_cells(column, batch)
+            results = llm.judge_cells(column, representatives)
         except Exception as exc:  # a scorer failure must not lose the rule verdict
             logger.warning("Cell AI 판단 실패: %s", exc)
-            cell_audit["failed"] += len(batch)
-            batch = []
+            cell_audit["failed"] += len(representatives)
+            batch = {}
             return
+        cell_audit["inference_seconds"] += time.perf_counter() - call_started
         updates = []
-        for cell, result in zip(batch, results):
+        for (key, group), result in zip(batch.items(), results):
+            cell_audit["decisions"] += len(group)
             if result.get("decision") is None:
-                cell_audit["failed"] += 1
+                cell_audit["failed"] += len(group)
                 continue
-            cell_audit["success"] += 1
-            status, confidence, method, needs_review = merge_cell_verdict(
-                cell["cell_status"], cell["confidence"], result["decision"], result["confidence"]
-            )
-            updates.append((result["decision"], status, confidence, method, needs_review,
-                            cell["row"], cell["column_index"]))
-            reuse[(cell["column_index"], cell["masked_value"], cell["rule_verdict"])] = (
-                status, confidence, method, needs_review)
+            cell_audit["success"] += len(group)
+            for cell in group:
+                status, confidence, method, needs_review = merge_cell_verdict(
+                    cell["cell_status"], cell["confidence"], result["decision"], result["confidence"]
+                )
+                updates.append((result["decision"], status, confidence, method, needs_review,
+                                cell["row"], cell["column_index"]))
+                reuse[key] = (result["decision"], status, confidence, method, needs_review)
         if updates:
             store.set_cell_ai_verdicts(updates)
-        batch = []
+        batch = {}
         if report_ai is not None:
-            report_ai(cell_audit["attempted"])
+            report_ai(cell_audit["attempted"] + cell_audit["reused"])
 
     for cell in store.iter_candidates(statuses, config.max_ai_cell_reviews):
-        key = (cell["column_index"], cell["masked_value"], cell["rule_verdict"])
-        cached = reuse.get(key)
-        if cached is not None:
-            status, confidence, method, needs_review = cached
-            store.set_cell_ai_verdicts([(cell["ai_verdict"] or status, status, confidence,
-                                         method, needs_review, cell["row"], cell["column_index"])])
-            cell_audit["reused"] += 1
-            continue
-        if batch_column is not None and (cell["column_index"] != batch_column
-                                         or len(batch) >= config.ai_cell_batch_size):
+        key = reuse_key(cell)
+        if context_reuse:
+            cached = reuse.get(key)
+            if cached is not None:
+                decision, status, confidence, method, needs_review = cached
+                apply_verdict(cell, cell["ai_verdict"] or decision, status, confidence,
+                              method, needs_review)
+                cell_audit["reused"] += 1
+                cell_audit["context_reused"] += 1
+                continue
+        if batch_column is not None and cell["column_index"] != batch_column:
             flush()
         batch_column = cell["column_index"]
-        batch.append(cell)
+        batch.setdefault(key, []).append(cell)
+        if len(batch) >= config.ai_cell_batch_size:
+            flush()
         if llm.memory_usage().get("rss_mb", 0) > 3500:
             logger.warning("RAM 한계 감지 -> Cell AI 추론 중단, 규칙 기반 결과 보존")
-            batch = []
+            batch = {}
+            cell_audit["memory_skipped"] = max(
+                0, cell_audit["candidates"] - cell_audit["attempted"] - cell_audit["reused"])
             break
     flush()
 
-    cell_audit["skipped"] = max(0, cell_audit["candidates"] - cell_audit["attempted"])
+    not_judged = max(0, cell_audit["candidates"] - cell_audit["attempted"] - cell_audit["reused"])
+    cell_audit["budget_skipped"] = max(0, not_judged - cell_audit["memory_skipped"])
+    cell_audit["skipped"] = not_judged
     cell_audit["seconds"] = round(time.perf_counter() - started, 3)
+    cell_audit["inference_seconds"] = round(cell_audit["inference_seconds"], 3)
     store.write_row_verdicts()  # row summary must reflect the merged cell verdicts
     audit["cell"] = cell_audit
     diagnostics.record("ai_cell_review", **cell_audit)
@@ -479,6 +528,7 @@ def analyse_file(
     if resume_from:
         diagnostics.record("resume_stats_seeded", **store.seed_column_stats(stats))
     batch: list[list[str]] = []
+    batch_lines: list[tuple[int, int]] = []
     cancelled = False
     code_sample: list[list[str]] = []
     last_progress_rows = 0
@@ -501,7 +551,7 @@ def analyse_file(
             last_progress_rows = loader.parsed_rows
             last_progress_cells = engine.cells_inspected
             progress(loader.parsed_rows, loader.progress_total(), engine.cells_inspected)
-    for index, row in loader.iter_rows():
+    for index, row, line_start, line_end in loader.iter_rows():
         # `loader` numbers rows from 0 while the ledger numbers them from 1, so a
         # checkpoint of 40 means rows 1..40 are already decided.
         if resume_from and index < resume_from:
@@ -517,20 +567,22 @@ def analyse_file(
             cancelled = True
             break
         batch.append(row)
+        batch_lines.append((line_start, line_end))
         if len(code_sample) < 500:
             code_sample.append(row)
         if len(batch) >= config.batch_size:
             t0 = time.perf_counter()
-            engine.process_batch(stats, batch)
+            engine.process_batch(stats, batch, batch_lines)
             batch_seconds += time.perf_counter() - t0
             batch = []
+            batch_lines = []
             store.register_columns([column.name for column in stats])
             store.mark_last_row(resume_from + engine.rows_analysed)
             report_progress()
 
     if batch:
         t0 = time.perf_counter()
-        engine.process_batch(stats, batch)
+        engine.process_batch(stats, batch, batch_lines)
         batch_seconds += time.perf_counter() - t0
         store.register_columns([column.name for column in stats])
         store.mark_last_row(resume_from + engine.rows_analysed)

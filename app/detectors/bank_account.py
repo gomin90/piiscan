@@ -8,7 +8,10 @@ from app.utils.validators import digits_only
 
 # Supported account layouts: segment-separated accounts, checksum-valid 12자,
 # or plain 10-14 digits only when the column name actually says "account".
-SEGMENT_RE = re.compile(r"^\d{2,4}-\d{4,8}-\d{1,4}$|^\d{1,5}-\d{6,10}$|^\d{3}-\d{6,8}-\d{4,6}$")
+# Every accepted layout needs at least 10 digits in total with a long body:
+# "100-1000-10" is a social-security/insurance shape and "1000-0000-12" is an
+# internal reference, neither of which is an account.
+SEGMENT_RE = re.compile(r"^\d{2,4}-\d{6,10}-\d{1,4}$|^\d{1,5}-\d{6,10}$|^\d{3}-\d{6,8}-\d{4,6}$")
 PLAIN_RE = re.compile(r"^\d{10,14}$")
 MASKED_RE = re.compile(r"^\d{4,6}[- ]?\d{3,4}[- ]?[*＊]{3,6}$|^\d{2}-[*＊]{4,8}-\d{2,4}$")
 # Exact shapes that belong to another detector; without an account column name
@@ -40,7 +43,12 @@ class BankAccountDetector(Detector):
         if not SEGMENT_RE.match(v) and not PLAIN_RE.match(v):
             return None
         digits = digits_only(v)
-        if bank_checksum_valid(digits):
+        if len(digits) < 10:
+            # "100-1000-10" is a 9-digit segmented number: insurance/SSN shape,
+            # not an account.
+            return None
+        if bank_checksum_valid(digits) and (self.column_affinity(column_name) >= 0.30
+                                            or SEGMENT_RE.match(v)):
             return Match(self.type_key, self.display_name, 0.9,
                         evidence="12자리 + bank checksum valid",
                         priority=self.priority, sensitivity=self.sensitivity)

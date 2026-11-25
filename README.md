@@ -57,12 +57,18 @@ Options: `--encoding`, `--delimiter`, `--header`, `--batch-size`, `--mode
 
 - Auto detection of encoding (UTF-8, UTF-8 BOM, CP949, EUC-KR, UTF-16) and
   delimiter (comma, semicolon, TAB, pipe); headerless files get `COL_001` names.
-- 31 detectors: 24 rule types - 주민등록번호(체크섬), 여권, 운전면허, 외국인등록, SSN, 국가보험,
-  카드번호(Luhn), 은행계좌(체크섬), 위도/경도, 이름, 이메일, 전화번호, 상세주소,
+- 46 detectors covering 36 PII types, driven by the policy file
+  `resources/rules/privacy_kr_2026.json`: 주민등록번호(체크섬), 여권, 운전면허, 외국인등록, SSN,
+  국가보험, 카드번호(Luhn), 은행계좌(체크섬), 위도/경도, 이름, 이메일, 전화번호, 상세주소,
   생년월일, IMSI, IMEI, 지문/홍채 후보, `.sec`/`.id`/wildcard 사용자 정의 ID,
-  SN/UUID/MAC/IP/Postcode(낮은 우선순위) - plus 7 *interior* scanners that look
-  inside long JSON / Base64 / log-text cells (resident id, phone, card, email,
-  passport, birth date, name) so personal data buried in a big field is still found.
+  SN/UUID/MAC/IP/Postcode(낮은 우선순위), 인증 credentials, 고객 연결식별 ID, Cell ID, RFID,
+  wireless network, FAX, payment info, personal attribute, GAID, GUID, masked values -
+  plus 9 *interior* scanners that look inside long JSON / Base64 / log-text Cells
+  (resident id, phone, card, email, passport, birth date, MAC, coordinates, device id)
+  and a free-text name scanner, so personal data buried in a big field is still found. Column-name affinity, negative
+  patterns and masked-value guards are applied before a Cell can be cleared as
+  non-personal, and a Cell containing several personal values reports each occurrence
+  with its character offset.
 - Cell-level PII verdicts: every Cell of every Row × Column gets a status
   (개인정보 / 검토 필요 / 비개인정보 / 미평가 / 빈 셀 / KEY 제외) with type,
   masked value, confidence, evidence and decision method. `privacy_cells.csv`
@@ -98,7 +104,7 @@ Options: `--encoding`, `--delimiter`, `--header`, `--batch-size`, `--mode
 ## Tests
 
 ```
-python -m pytest tests -q                     # 258 tests (unit, integration, QA)
+python -m pytest tests -q                     # 299 tests (unit, integration, QA, performance)
 python tools/gold_accuracy.py --with-ai       # Cell-level gold set: P/R/F1 per type
 python tools/scale_benchmark.py --rows 150000 --columns 50 --key SEQ_NO
 python tools/metadata_benchmark.py --rows 5000
@@ -150,7 +156,8 @@ piiscan-model-0.8b.zip   508.6 MB   0.8B v3 GGUF + tokenizer
 piiscan-model-2b.zip    1219.1 MB   2B v4 GGUF + tokenizer
 ```
 
-Published at [release v0.7.0](https://github.com/gomin90/piiscan/releases/tag/v0.7.0).
+Published at [release v0.7.1](https://github.com/gomin90/piiscan/releases/tag/v0.7.1).
+Change history per version is in [CHANGELOG.md](CHANGELOG.md).
 Build them yourself with `python tools/make_release_bundle.py --split`, then check integrity with
 `scripts/windows/verify-offline-bundle.ps1`.
 

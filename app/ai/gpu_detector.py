@@ -21,6 +21,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.ai.scorer_resolver import find_backend
+
 GPU_BACKENDS = {
     "windows": ("ggml-cuda.dll", "ggml-cuda.dylib"),
     "linux": ("libggml-cuda.so", "ggml-cuda.so"),
@@ -120,18 +122,15 @@ def _search_dirs(binary_dir: Path | None) -> list[Path]:
 
 
 def gpu_backend_present(binary_dir: Path | None = None, system: str | None = None) -> tuple[bool, str]:
-    """Is a GPU-capable llama.cpp backend actually installed next to the scorer?
+    """Is a GPU-capable llama.cpp backend actually installed where llama.cpp looks?
 
     Returns (found, path). Detecting an NVIDIA card is not enough: without ggml-cuda.dll
-    (Windows) or libggml-metal.dylib (macOS) llama.cpp runs on the CPU.
+    (Windows) or libggml-metal.dylib (macOS) llama.cpp runs on the CPU. The search order
+    is the one shared with the scorer resolver: GGML_BACKEND_DIR / GGML_BACKEND_PATH,
+    the scorer directory, then the CWD. A library found only on PATH is not a backend.
     """
-    key = {"Windows": "windows", "Linux": "linux", "Darwin": "macos"}.get(system or platform.system(), "")
-    for name in GPU_BACKENDS.get(key, ()):
-        for directory in _search_dirs(binary_dir):
-            candidate = directory / name
-            if candidate.exists():
-                return True, str(candidate)
-    return False, ""
+    info = find_backend(binary_dir, system)
+    return bool(info["found"]), info["path"]
 
 
 # ---------------------------------------------------------------- CUDA forensics

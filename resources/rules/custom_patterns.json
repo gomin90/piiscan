@@ -61,6 +61,36 @@
         ".xlsx",
         ".zip"
       ]
+    },
+    {
+      "id": "member_id",
+      "label": "member/customer 접두사 ID",
+      "pattern": "(?:member|customer)[_-]?[A-Za-z0-9]{4,20}",
+      "max_len": 24,
+      "charset": "alnum_-",
+      "type": "CUSTOM_IDENTIFIER",
+      "display_name": "회원/고객 ID",
+      "sensitivity": 0.6
+    },
+    {
+      "id": "digits_alpha_digits",
+      "label": "6digits+1alpha+4digits ID",
+      "pattern": "\\d{6}[A-Za-z]\\d{4}",
+      "max_len": 20,
+      "charset": "alnum",
+      "type": "CUSTOM_IDENTIFIER",
+      "display_name": "복합 사용자 ID",
+      "sensitivity": 0.6
+    },
+    {
+      "id": "segmented_id",
+      "label": "-로 구분된 4부분 ID",
+      "pattern": "[A-Za-z0-9]{2,8}(?:-[A-Za-z0-9]{2,8}){3}",
+      "max_len": 40,
+      "charset": "alnum_-",
+      "type": "CUSTOM_IDENTIFIER",
+      "display_name": "구분자 포함 ID",
+      "sensitivity": 0.55
     }
   ]
 }

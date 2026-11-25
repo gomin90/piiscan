@@ -14,6 +14,7 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.ai.scorer_resolver import scorer_candidates, select_scorer
 from app.config.settings import project_root
 
 IS_WINDOWS = os.name == "nt"
@@ -149,15 +150,8 @@ class JevStyleModelManager:
         self.project_root = self.root.parents[1] if len(self.root.parents) > 1 else project_root()
 
     def _scorer_candidates(self, directory: Path, meta: dict) -> list[Path]:
-        """Platform-aware scorer search. Windows ships `*.exe` beside llama.dll."""
-        candidates: list[Path] = []
-        if IS_WINDOWS:
-            candidates.append(directory / "build" / f"{meta['scorer_bin']}.exe")
-            # pre-built offline Windows runtime (runtime/windows/jev-score.exe)
-            candidates.append(self.project_root / WINDOWS_RUNTIME_DIR / f"{meta['scorer_bin']}.exe")
-        else:
-            candidates.append(directory / "build" / meta["scorer_bin"])
-        return candidates
+        """Platform-aware scorer search, shared with gpu_detector (spec section 8)."""
+        return scorer_candidates(directory, meta["scorer_bin"], self.project_root, IS_WINDOWS)
 
     def _native_libs_ok(self, scorer: Path) -> list[str]:
         """llama.dll + friends must sit next to a Windows scorer, else it cannot start."""
@@ -185,13 +179,8 @@ class JevStyleModelManager:
                 except (json.JSONDecodeError, OSError):
                     expected = None
 
-            candidate_scorers = self._scorer_candidates(directory, meta)
-            env_bin = Path(os.environ.get(
-                "JEV_SCORE_BIN" if meta["scorer_bin"] == "jev-score" else "JEV_SCORE_V2_BIN", ""
-            ))
-            if env_bin.is_file():
-                candidate_scorers.append(env_bin)
-            scorer = next((path for path in candidate_scorers if path.is_file()), None)
+            scorer, _scorer_notes = select_scorer(directory, meta["scorer_bin"],
+                                                  self.project_root, IS_WINDOWS)
 
             architecture = read_gguf_metadata(gguf, ("general.architecture", "general.name", "general.quantization_version"))
             problems: list[str] = []

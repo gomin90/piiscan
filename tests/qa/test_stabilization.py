@@ -176,9 +176,15 @@ def test_reanalysing_a_file_replaces_its_own_records(tmp_path: Path) -> None:
     store = DetailStore(shared, "audit")
     total = store.conn.execute("SELECT COUNT(*) FROM row_detail").fetchone()[0]
     cells = store.conn.execute("SELECT COUNT(*) FROM cell_detail").fetchone()[0]
+    merged = store.conn.execute("SELECT COUNT(*) FROM cell_info").fetchone()[0]
     store.close()
     assert total == 2, f"row records accumulated across runs: {total}"
-    assert cells == 2, f"cell records accumulated across runs: {cells}"
+    # cell_detail is the raw per-detector audit trail and cell_info the merged
+    # per-Cell ledger: neither may grow when the same file is analysed twice.
+    assert merged == second.cell_counts["detail_cells_stored"], (
+        f"merged cell records accumulated across runs: {merged}")
+    assert cells == first.cell_counts["raw_cell_hits"], (
+        f"cell audit trail accumulated across runs: {cells}")
     assert list(iter_hit_cells([second])) and len(list(iter_row_records([second]))) == 2
 
 
@@ -336,7 +342,11 @@ def test_large_json_and_base64_fields_still_scanned(tmp_path: Path) -> None:
     result = analyse_file(path, config)
     assert result.rows_error == 0
     assert result.rows_parsed == 1
-    types = {cell["privacy_type"] for cell in iter_hit_cells([result])}
+    # A Cell hit reports every type its detectors recognised, so the codes are
+    # comma separated on a merged Cell.
+    types = {code.strip()
+             for cell in iter_hit_cells([result])
+             for code in cell["privacy_type"].split(",")}
     assert {"PHONE_NUMBER", "RESIDENT_ID"} <= types, types
     for cell in iter_hit_cells([result]):
         assert pii not in cell["masked_value"]

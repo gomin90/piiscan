@@ -86,15 +86,41 @@ if ($toolkits) {
     Write-Host "  redistributable DLLs if they are on PATH or copied into $runtime."
 }
 
-Write-Host "=== 3. Backend DLLs installed in $runtime ==="
-$dlls = Get-ChildItem -LiteralPath $runtime -Filter *.dll | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
-foreach ($d in $dlls) { Write-Host ("  {0,-28} {1,8} MB" -f $d.Name, $d.MB) }
-$cudaPath = Join-Path $runtime "ggml-cuda.dll"
-if (-not (Test-Path -LiteralPath $cudaPath)) {
-    Write-Host "  ggml-cuda.dll MISSING -> llama.cpp has no CUDA backend, so inference is CPU-only."
+Write-Host "=== 3. Backend DLLs where llama.cpp actually looks ==="
+# Same order as app/ai/scorer_resolver.py: GGML_BACKEND_DIR, GGML_BACKEND_PATH,
+# the scorer directory, then the current working directory. PATH alone is NOT
+# a backend location for a dynamically loaded ggml backend.
+$searchDirs = @()
+foreach ($envName in @("GGML_BACKEND_DIR", "GGML_BACKEND_PATH")) {
+    foreach ($entry in (($env:$envName) -split ';')) { if ($entry) { $searchDirs += $entry } }
+}
+$searchDirs += $runtime
+$searchDirs += (Get-Location).Path
+$cudaPath = $null
+foreach ($dir in $searchDirs) {
+    $candidate = Join-Path $dir "ggml-cuda.dll"
+    if (Test-Path -LiteralPath $candidate) { $cudaPath = $candidate; break }
+}
+foreach ($dir in $searchDirs) {
+    if (Test-Path -LiteralPath $dir) {
+        foreach ($d in (Get-ChildItem -LiteralPath $dir -Filter *.dll)) {
+            Write-Host ("  {0,-28} {1,8} MB  ({2})" -f $d.Name, [math]::Round($d.Length/1MB,1), $dir)
+        }
+    }
+}
+if (-not $cudaPath) {
+    Write-Host "  ggml-cuda.dll MISSING in GGML_BACKEND_DIR / the scorer directory / CWD"
+    Write-Host "  -> llama.cpp has no CUDA backend, so inference is CPU-only."
+    foreach ($entry in ($env:PATH -split ';')) {
+        if ($entry -and (Test-Path -LiteralPath (Join-Path $entry "ggml-cuda.dll"))) {
+            Write-Host ("  NOTE: ggml-cuda.dll exists on PATH ({0}) but PATH is not searched by" -f $entry)
+            Write-Host "        the dynamic backend loader. Copy it next to the scorer or set GGML_BACKEND_DIR."
+        }
+    }
     Write-Host "  Fix: scripts\windows\install-cuda-backend.ps1"
     exit 0
 }
+Write-Host ("  ggml-cuda.dll found at: {0}" -f $cudaPath)
 
 Write-Host "=== 4. What ggml-cuda.dll needs ==="
 $info = Read-CudaStrings $cudaPath
@@ -142,11 +168,20 @@ Write-Host "  running $exe --ngl 999 (reads one empty request, then exits)"
 # Feed the scorer an empty stdin so it prints its info line and exits instead of waiting for requests.
 $emptyInput = Join-Path $env:TEMP "gpu-probe-empty.txt"
 [System.IO.File]::WriteAllText($emptyInput, "")
-$process = Start-Process -FilePath $exe -ArgumentList "--model", $Model, "--ngl", "999", "--n-ctx", "4096", "--n-ubatch", "1024" `
-    -RedirectStandardInput $emptyInput -RedirectStandardOutput "$runtime\gpu-probe-out.json" `
-    -RedirectStandardError "$runtime\gpu-probe-err.txt" -PassThru -WindowStyle Hidden
-$process.WaitForExit(120000)
-if (-not $process.HasExited) { $process.Kill() }
+# `-WindowStyle Hidden` and `-NoWindow` are mutually exclusive in Start-Process and
+# raise "Parameter set cannot be resolved" on some PowerShell builds, so the probe
+# is started without a window-style parameter, and falls back to a direct call.
+try {
+    $process = Start-Process -FilePath $exe -ArgumentList "--model", $Model, "--ngl", "999", "--n-ctx", "4096", "--n-ubatch", "1024" `
+        -RedirectStandardInput $emptyInput -RedirectStandardOutput "$runtime\gpu-probe-out.json" `
+        -RedirectStandardError "$runtime\gpu-probe-err.txt" -PassThru
+    $process.WaitForExit(120000)
+    if (-not $process.HasExited) { $process.Kill() }
+} catch {
+    Write-Host "  Start-Process probe failed ($_) -> running the scorer directly"
+    & $exe --model $Model --ngl 999 --n-ctx 4096 --n-ubatch 1024 < $emptyInput `
+        1> "$runtime\gpu-probe-out.json" 2> "$runtime\gpu-probe-err.txt"
+}
 $out = Get-Content -LiteralPath "$runtime\gpu-probe-out.json" -Raw -ErrorAction SilentlyContinue
 $err = Get-Content -LiteralPath "$runtime\gpu-probe-err.txt" -Raw -ErrorAction SilentlyContinue
 Write-Host "  stderr (llama.cpp CUDA errors):"

@@ -12,13 +12,11 @@ SYSTEM_PROMPT = (
     '"reason": str, "requires_review": bool}'
 )
 
-VALID_TYPES = [
-    "RESIDENT_ID", "PASSPORT", "DRIVER_LICENSE", "FOREIGNER_ID", "SOCIAL_SECURITY",
-    "INSURANCE_NUMBER", "CARD_NUMBER", "BANK_ACCOUNT", "LATITUDE", "LONGITUDE",
-    "NAME", "EMAIL", "PHONE_NUMBER", "ADDRESS", "BIRTH_DATE", "IMSI", "IMEI",
-    "FINGERPRINT", "IRIS", "CUSTOM_SEC_ID", "CUSTOM_ID_SUFFIX", "CUSTOM_WILDCARD_ID",
-    "SN", "UUID", "MAC", "IP", "POSTCODE", "CODE_GROUP", "NONE",
-]
+from app.config.privacy_policy import get_policy
+
+#: The model may only name types the rule engine actually understands, so the
+# allowed list is derived from the privacy policy rather than hardcoded here.
+VALID_TYPES = sorted({code for code in get_policy().types if code != "MASKED"} | {"NONE"})
 
 
 def column_context(column: dict) -> dict:
@@ -83,6 +81,10 @@ def row_context(record: dict) -> dict:
         "confirmed_types": record.get("confirmed_types", []),
         "possible_types": record.get("possible_types", []),
         "cells_checked": record.get("cells_checked", 0),
+        # The KEY columns identify the record; the model may see them only in
+        # masked form, which is what the store keeps (spec section 4).
+        "key_columns": [part for part in (record.get("key_mask") or "").split(" | ") if part],
+        "source_line": record.get("line_start") or record.get("row"),
         "cells": [
             {
                 "column": cell.get("column"),

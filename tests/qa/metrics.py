@@ -235,20 +235,26 @@ def cell_row_metrics(natural_names: bool = True) -> dict:
     hits = collect_hit_cells([result])
     cell_tp = cell_fp = cell_fn = 0
     per_type: dict[str, dict[str, int]] = {}
+
+    def cell_types(cell: dict) -> set[str]:
+        """A merged Cell may name several types; score each one separately."""
+        return {part.strip() for part in cell["privacy_type"].split(",") if part.strip()}
+
     for cell in hits:
         expected, also_ok = truth.get((cell["row_number"], cell["column_index"]), (None, ()))
-        entry = per_type.setdefault(cell["privacy_type"], {"tp": 0, "fp": 0, "fn": 0})
-        if expected is not None and (cell["privacy_type"] == expected or cell["privacy_type"] in also_ok):
-            cell_tp += 1
-            entry["tp"] += 1
-        else:
-            cell_fp += 1
-            entry["fp"] += 1
+        for kind in cell_types(cell):
+            entry = per_type.setdefault(kind, {"tp": 0, "fp": 0, "fn": 0})
+            if expected is not None and (kind == expected or kind in also_ok):
+                cell_tp += 1
+                entry["tp"] += 1
+            else:
+                cell_fp += 1
+                entry["fp"] += 1
     for (row, index), (expected, _also_ok) in truth.items():
         if expected is None:
             continue
         if not any(c["row_number"] == row and c["column_index"] == index
-                   and c["privacy_type"] == expected for c in hits):
+                   and expected in cell_types(c) for c in hits):
             cell_fn += 1
             per_type.setdefault(expected, {"tp": 0, "fp": 0, "fn": 0})["fn"] += 1
 

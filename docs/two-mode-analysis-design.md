@@ -1,7 +1,7 @@
 # Privacy Scanner — 두 분석 기능 완전 분리 설계 (Function A / Function B)
 
 - 기준: v0.7.0 릴리스 소스 (commit `50c4945` (v0.6.0) 위에 Function A/B 분리·Cell-Level 판정·Layout D·PII Grouping·QThread Worker·PagedTableModel 작업)
-- 상태: **구현·검증 완료, v0.7.0 릴리스** (manifest 재생성, split bundle rebuild, tag/Release_upload 포함)
+- 상태: **구현·검증 완료, v0.7.1 릴리스** (§11의 v0.7.1 정확도·성능 재실측, manifest 재생성, split bundle rebuild, tag/Release upload 포함)
 - 모든 수치는 이 저장소·이 환경(macOS Apple Silicon, Python 3.15, Jev-Style 0.8B-v3 Metal)에서 **실실행 측정**한 값. 미실행 항목은 "미검증"으로 표시
 
 ---
@@ -627,7 +627,7 @@ bundle rebuilt, commit + tag + GitHub Release with assets uploaded.
 아래 항목은 **이 환경에서 실행하지 않았으므로 통과로 보고하지 않는다.**
 
 - Windows RAM 8GB CPU-only / NVIDIA GPU / RTX 5060 + CUDA 13.3 실제 추론 → macOS Apple Silicon에서는 실행 불가. PowerShell 스크립트 문법과 DLL 검색 경로만 정적 검증(`pwsh` Parser: `scripts/windows/*.ps1` 9 files, 0 parse errors)
-- Windows EXE / macOS offline bundle 실행 → v0.7.0 split bundle은 rebuilt(assets uploaded) 되었으나 Windows/macOS 환경에서 **unzip·실행** verified가 아니다. Manifest는 rebuild 후 271 entries / 2,530.8 MB, 0 mismatch로 QA 통과
+- Windows EXE / macOS offline bundle 실행 → v0.7.1 split bundle은 rebuilt + manifest verified. macOS에서는 `piiscan-app.zip` unzip 후 CLI/GUI 실실행으로 verified(§11.7). Windows EXE는 이 환경에서 실행 불가 → 미검증
 - VRAM 사용량 → 이 Mac(Metal)에서 ggml backend가 VRAM counter를 노출하지 않음 → `null`로 보고
 - Internet 완전 차단 환경에서의 빌드/실행 → network-off 테스트 없음
 
@@ -725,6 +725,8 @@ flowchart TD
 
 ### 10.6 실측 결과 요약
 
+(v0.7.1 이후 재실측값은 §11에 별도 listing; 아래 표는 v0.7.0 시점 측정)
+
 | 항목 | 결과 |
 |---|---|
 | Function A scale, 4 scenarios | §5.6 table, all 7 invariants pass, 13,439–33,203 cells/s (re-run values in §5.6) |
@@ -740,7 +742,8 @@ flowchart TD
 | Temp store lifecycle | 9 tests pass (23.61 s after the fix). `sweep_orphans()` measured: 6 stores inventoried, 1 stale 23.7 GB store removed, 5 skipped because a live process held them open (`psutil.open_files` guard). Earlier orphan accumulation (~207 GiB of `piiscan-detail-*`) was reclaimed; no store survives a normal, cancelled, or SIGTERM exit |
 | **SIGTERM deadlock (found + fixed this turn)** | `test_sigterm_cleans_open_stores` hung: the handler ran on the writer thread inside `DetailStore._exec_many`, so `cleanup_all() -> close() -> flush() -> _exec_many` waited on the Non-reentrant `threading.Lock` it already held (faulthandler stack dump: `_exec_many` → `handle` → `_exec_many`). Fix: `self._lock = threading.RLock()` in `app/core/detail_store.py`. Before: child never exits, temp store left behind, test times out at 300 s. After: rc 0, no leftover `piiscan-detail-*`, whole lifecycle file 9/9 in 23.61 s |
 | Leakage | 7 tests pass (logs/exports/prompts/exceptions/JSON) |
-| Full pytest suite (v0.7.0, manifest regenerated) | **257 passed, 0 failed, 1 skipped** in 584.68 s (2026-11-24). `test_manifest_exists_and_is_well_formed` now passes: the regenerated manifest has **271 entries / 2,530.8 MB** with 0 hash mismatches and 0 missing files. The 1 skipped test is `test_unregistered_worker_still_aborts` (deliberate-crash control, only runs with `PIISCAN_TEARDOWN_CONTROL=1`). 0 `piiscan-detail-*` directories remained after the run |
+| Full pytest suite (v0.7.1, manifest regenerated) | **298 passed, 0 failed, 1 skipped** in 684.42 s (2026-11-25). `test_manifest_exists_and_is_well_formed` passes: the regenerated manifest has **280 entries / 2,531.0 MB** with 0 hash mismatches and 0 missing files. The 1 skipped test is `test_unregistered_worker_still_aborts` (deliberate-crash control, only runs with `PIISCAN_TEARDOWN_CONTROL=1`). 0 `piiscan-detail-*` directories remained after the run |
+| Full-suite flake (reported, not hidden) | In two of four full runs `tests/qa/test_stabilization.py::test_peak_rss_sampler_records_the_maximum_not_the_last_value` failed with `assert 651.64 >= 613.875 + 50`. It passes 3/3 when run alone (0.35 s) and passed in the release-gate run above. Cause: the test allocates a 60 MB ballast and expects RSS to grow ≥50 MB; inside a long-lived pytest process previously freed arenas are reused, so RSS barely moves. The sampler logic itself is correct. The test criteria and budgets were **not** changed |
 
 ### 10.7 미해결 / 미검증 (pass로 보고하지 않음)
 
@@ -748,9 +751,9 @@ flowchart TD
 2. **Windows 8GB / NVIDIA GPU / EXE·macOS bundle 실행**: bundle rebuild·manifest regeneration 금지 → 실행 검증 불가.
 3. **VRAM**: ggml backend이 VRAM counter를 노출하지 않음 → 보고 값 `null`.
 4. **Network-off build/run**: offline network-isolation test 없음.
-5. **Manifest staleness — resolved for the release.** Before this release **27 of the 235 manifest entries** had sizes/SHA-256 that no longer matched the working tree (`app/core/detail_store.py` 17,758 → 61,704 B, `app/ai/gpu_detector.py` 20,489 → 20,789 B, `scripts/windows/gpu-check.ps1`, etc.), which made `tests/qa/test_offline_bundle.py::test_manifest_exists_and_is_well_formed` fail. Because this turn authorises manifest regeneration for the release, the manifest was rebuilt from the staged source (**271 entries**, 2,530.8 MB, 0 mismatches, 0 missing, no duplicate paths) and every entry was re-checked against the three split bundle zips by size and SHA-256. Verification is reproducible with `python tools/make_bundle_manifest.py --verify`.
-6. **Gold coverage gap — closed.** 여권·운전면허·IMSI·IMEI·위도/경도·UUID·MAC·IP·Postcode detectors previously had no gold-labelled Cell; `tests/fixtures/gold_cells.py` now carries positive + look-alike negative cases for all of them (§6.1). Residual, still open: **10 Cell end as `검토 필요` rather than a confirmed verdict** — 2 SN candidates (`SN-1234-ABCD` in `DEVICE_SN`, `TXN987654321` in `ORDER_REF`: the SN detector never reaches the 0.70 confirm threshold), 1 card candidate (`352031091234566` in `IMEI_NO`), 1 postcode candidate (`1234567` in `MAC_ADDR`), 1 주민등록번호 candidate (`900101-1234567` in `INTERNAL_CODE`), and 5 type-less Cells (`HASH:…`, `MASK:9001**-******`, `ENC:…`, `고객 1234567890123456789012345678`, the bare date in `EVENT_DATE`). These are reported as unresolved, never as correct negatives.
-7. **Function B full AI coverage latency**: 2,811 columns 202 s → default budget 200으로 제한; 전량 AI 적용 시 5,000 rows에서 ~3.4 min.
+5. **Manifest staleness — resolved for the release.** Before this release **27 of the 235 manifest entries** had sizes/SHA-256 that no longer matched the working tree (`app/core/detail_store.py` 17,758 → 61,704 B, `app/ai/gpu_detector.py` 20,489 → 20,789 B, `scripts/windows/gpu-check.ps1`, etc.), which made `tests/qa/test_offline_bundle.py::test_manifest_exists_and_is_well_formed` fail. Because this turn authorises manifest regeneration for the release, the manifest was rebuilt from the staged source (**280 entries** for v0.7.1, 2,531.0 MB, 0 mismatches, 0 missing, no duplicate paths; v0.7.0 had 271 entries / 2,530.8 MB) and every entry was re-checked against the three split bundle zips by size and SHA-256. Verification is reproducible with `python tools/make_bundle_manifest.py --verify`.
+6. **Gold coverage gap — closed; masked values remain conservative.** 여권·운전면허·IMSI·IMEI·위도/경도·UUID·MAC·IP·Postcode detectors previously had no gold-labelled Cell; `tests/fixtures/gold_cells.py` now carries positive + look-alike negative cases for all of them (§6.1). The v0.7.1 gold set is `tests/fixtures/gold_generated.py` (1,972 Cells, FP 0) and **4 Cells still end as `검토 필요` rather than a confirmed verdict**: `PASSPORT_NO` `M1*****7` and `E1*****6`, `PASSWORD` `0f************f`, and `CONTACT_NOTE` `김철************t`. The rule confidences are 0.667 / 0.667 / 0.454 / 0.600 — below the 0.70 confirm threshold — and a masked value in a protected column is never cleared as non-personal, so these four stay in the review queue instead of being silently labelled personal or non-personal. They are reported as unresolved, never as correct negatives.
+7. **Function B full AI coverage latency — resolved in v0.7.1.** Previously 2,811 columns took 202 s, so the default budget was capped at 200 columns. With the reuse cache (§11.2) the same fixture needs only **12 distinct inferences** (2,799 reuse hits) and full coverage runs in **3.75–3.87 s**, so the cap is no longer needed for correctness, only as a guard for pathological schemas.
 
 ### 10.8 실행 방법(실기 verified commands)
 
@@ -774,7 +777,7 @@ python app/main.py --analysis metadata --file metadata.csv --field-map table_nam
 python tools/scale_benchmark.py --rows 150000 --columns 20 --key SEQ_NO --key RECORD_KEY --json results/scale.json
 python tools/metadata_benchmark.py --rows 5000 --with-ai --json results/metadata.json
 python tools/gold_accuracy.py --with-ai --json results/gold.json
-python -m pytest tests -q            # 257 passed / 1 skipped (teardown control)
+python -m pytest tests -q            # 298 passed / 1 skipped (teardown control)
 ```
 
 Windows CUDA 13.3 / RTX 5060(미실측, syntax만 verified):
@@ -784,3 +787,120 @@ powershell -ExecutionPolicy Bypass -File scripts\windows\gpu-check.ps1
 powershell -ExecutionPolicy Bypass -File scripts\windows\install-cuda-backend.ps1 -CudaVersion 13.3
 powershell -ExecutionPolicy Bypass -File scripts\windows\build-cuda-133-backend.ps1   # CUDA 13.3 toolchain으로 직접 빌드
 ```
+
+---
+
+## 11. v0.7.1 재실측 (2026-11-25)
+
+v0.7.0 이후 추가된 policy layer(`resources/rules/privacy_kr_2026.json`, 34 type),
+affinity short-circuit, occurrence-offset(`spans`), Function B reuse cache를 모두 포함한
+최신 소스로 모든 benchmark을 다시 실행했다. 환경: macOS Apple Silicon(18 core, 64 GB),
+Python 3.15, backend `metal`. artifacts: `results/scale_v071*.json`, `results/metadata_bench_v071*.json`,
+`results/gold_v071_rule.json`, `results/gold_v071_ai.json`.
+
+### 11.1 Function A scale(150k × 20/50/100/200, KEY unspecified, rule-only)
+
+| scenario | logical cells | analyzed | 개인정보 | 검토 | 비개인정보 | 미평가 | 빈 셀 | 시간 | Cell/s | Peak RSS | SQLite | PII group | invariants |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| 150k×20 | 3,000,000 | 3,000,000 | 1,918,243 | 0 | 454,620 | 327,137 | 300,000 | 161.12 s | 18,620 | 88.9 MB | 1,459.4 MB | 1,004,521 | all 7 pass |
+| 150k×50 | 7,500,000 | 7,500,000 | 4,791,027 | 0 | 1,136,083 | 822,890 | 750,000 | 491.29 s | 15,265 | 91.8 MB | 4,140.1 MB | 2,191,254 | all 7 pass |
+| 150k×100 | 15,000,000 | 15,000,000 | 9,578,600 | 0 | 2,272,614 | 1,648,786 | 1,500,000 | 1,052.83 s | 14,247 | 113.5 MB | 8,280.2 MB | 4,030,683 | all 7 pass |
+| 150k×200 | 30,000,000 | 30,000,000 | 19,152,958 | 0 | 4,545,391 | 3,301,651 | 3,000,000 | 2,062.18 s | 14,547 | 158.8 MB | 17,315.7 MB | 7,275,466 | all 7 pass |
+
+(Measured with `python tools/scale_benchmark.py --rows 150000 --columns N --json results/scale_v071.json` —
+`source_grid_equals_logical`, `status_counts_sum_equals_logical`, `cell_csv_rows_equal_logical`,
+`record_csv_rows_equal_rows`, `no_missing_cells` 모두 True.)
+
+**Same fixture with 2 KEY columns** (`--key SEQ_NO --key RECORD_KEY`, `results/scale_v071_key.json`):
+3,000,000 logical Cells, **300,000 KEY excluded** (= 2 × 150,000 Row), 2,700,000 analysed,
+1,781,822 개인정보 / 291,041 비개인정보 / 327,137 미평가 / 300,000 `KEY 제외`, 163.38 s,
+18,362 Cells/s, 89.5 MB peak RSS, 1,671.3 MB store, 875,130 PII groups — all 7 invariants pass,
+including `key_excluded_cells_equal_key_columns_times_rows` and `record_csv_rows_equal_rows`.
+
+Note: the first 150k×200 attempt in this run reported 29,200,400 logical Cells and failed two invariants.
+Cause: two `tools/scale_benchmark.py` processes were running at once and shared the fixture file
+`results/bench_150000x200.csv`, so one truncated it while the other read it (146,002 Row instead of
+150,000). Re-running the scenario alone gave 30,000,000 Cells / 150,000 Row / all invariants pass.
+**Benchmark fixtures are not safe to share between concurrent runs** — run scenarios sequentially.
+
+### 11.2 Function B metadata(5,000 rows × 3 header variants)
+
+| metric | rule-only | rule+AI(default budget) | rule+AI(full coverage) |
+|---|---:|---:|---:|
+| total time | 0.209–0.258 s | 3.595–3.61 s | 3.75–3.87 s |
+| AI candidates | 2,811 | 2,811 | 2,811 |
+| AI inferences attempted | 0 | 12 | 12 |
+| AI verdicts reused | 0 | 2,799 | 2,799 |
+| AI failures | 0 | 0 | 0 |
+| field mapping accuracy | 11/11 = 1.00 | 11/11 = 1.00 | 11/11 = 1.00 |
+| classification P / R / F1 | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 |
+| Peak RSS | 37.6 MB | 259.8–316.5 MB | ~300 MB |
+| store | 3.04 MB | 3.14 MB | 3.14 MB |
+
+§10.7 item 7 (Function B 전량 AI 202 s) is resolved: identical column signature reuse collapses 2,811
+candidates into 12 distinct inferences, so full coverage is now ~3.8 s, not ~3.4 min.
+
+### 11.3 Gold set accuracy
+
+Gold fixture 1,972 Cells(83 labelled Row), fixture grid 122,688 logical Cells, completeness True.
+
+| run | P | R | F1 | FP | FN | time |
+|---|---:|---:|---:|---:|---:|---:|
+| rule-only | 1.0000 | 0.9957 | 0.9978 | 0 | 5 | 1.12 s |
+| rule+AI | 1.0000 | 0.9957 | 0.9978 | 0 | 5 | 30.95 s(16.3 s inference) |
+
+Per-type recall is 1.00 for 32 of the 36 labelled types; the shortfall is PASSPORT 0.94, AUTH_CREDENTIAL
+0.97, BANK_ACCOUNT 0.97, NAME 0.97. The 5 FN are **4 Cells that end as `검토 필요`**, all of them masked
+values (`M1*****7`, `E1*****6`, `0f************f`, `김철************t`). No type was ever cleared as
+non-personal by mistake (FP 0 in every type). `CARD_NUMBER` precision improved from 0.9688 to 1.00 by
+the masked-value guard in `rule_negative_verdict()`.
+
+### 11.4 Cell occurrence offsets
+
+`cell_info.spans` stores `TYPE@start-end` and `privacy_cells.csv` gains `match_position`; a Cell with two
+phone numbers reports `PHONE_NUMBER@4-17;PHONE_NUMBER@21-34` with `tier=2`, `occurrence=2` and
+`multi_occurrence_cells` / `extra_occurrences` counters in the summary. `multi_occurrence_cells = 1`,
+`extra_occurrences = 1` verified end-to-end in `tools/gold_accuracy.py` QA harness.
+
+### 11.5 Lifecycle / GUI
+
+- `tests/qa/test_gui_exit_paths.py` + `tests/qa/test_temp_store_lifecycle.py` + `tests/qa/test_release_gaps.py`: **20 passed** in 42.33 s (offscreen Qt).
+- After the 4-scenario 150k scale benchmark and the full suite, **0 `piiscan-detail-*` directories** remained in `$TMPDIR`.
+- Function B metadata runs create their store in the same registered/lifecycle path (`sweep_orphans()` is called before every new store in both Function A and Function B).
+
+### 11.6 perf regression gates
+
+`tests/performance/` enforces the two budgets that previously failed under load:
+130,000-row streaming analysis < 120 s and the 1,000×1,000 (1M Cell) scenario < 30 s.
+Run alone: **6 passed in 186.00 s** (2026-11-25). They fail only when a scale benchmark competes
+for the same CPU — do not run benchmarks and the perf suite concurrently.
+
+Scenario D had no headroom (30.4–30.9 s against a 30 s budget). Profiling showed
+`CustomIdentifierDetector.match()` rebuilding `int(rule["max_len"])`, a 26-item lowercase
+exclude tuple and an `any(ch.isalpha() for ch in v)` scan for every one of the 1M Cells.
+Precomputing those tuples in `__init__` and using the profile's already-computed `alpha`
+count lowered the 1M Cell run to **27.1 / 27.0 / 27.6 s** (three repeat runs) with `cell_hits`
+unchanged at 200,000. No budget or assertion was relaxed.
+
+### 11.7 릴리스 패키지 실행 검증(macOS)
+
+`python tools/make_release_bundle.py --split` 산출물을 실제 unzip 하여 실행했다:
+
+| check | result |
+|---|---|
+| `piiscan-app.zip` + `piiscan-model-0.8b.zip` unzip | 256 + 15 entries, every entry matches the manifest size, no extra files |
+| extracted `python app/main.py --version` | `Privacy Scanner 0.7.1` |
+| extracted Function A CLI(`samples/windows_sample.csv`, `--key SEQ_NO`) | Row 8 / Cell 176, 64 Cell verdicts, 45 PII groups, report + CSV written, 0.02 s |
+| extracted Function B CLI(`tests/fixtures/metadata_small.csv`) | 5 테이블 / 12 컬럼, 규칙 판정, store `removed=True` |
+| extracted GUI(offline, `QT_QPA_PLATFORM=offscreen`) | window title `개인정보 탐지 및 분석 시스템 (Privacy Scanner 0.7.1)` |
+| output leakage scan of every produced CSV/TXT | no raw phone/email/주민등록 patterns present — masked values only |
+| `piiscan-detail-*` residue after the packaged runs | 0 directories |
+
+Bundle assets (v0.7.1): `piiscan-app.zip` 771.4 MB / 254 files,
+`piiscan-model-0.8b.zip` 508.6 MB / 13 files, `piiscan-model-2b.zip` 1,219.1 MB / 13 files.
+Every entry inside each archive was compared against the manifest by size (all matched,
+no extra files); the asset SHA-256 digests are published in the GitHub release notes so
+that this document does not have to contain the hash of the archive that contains it.
+
+Still **not** verified: running the bundle on Windows (EXE / PowerShell scripts), a fully
+network-isolated install, and VRAM usage.

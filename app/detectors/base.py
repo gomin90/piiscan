@@ -136,6 +136,17 @@ class Match:
     fragment: str = ""
     priority: int = 1
     sensitivity: float = 0.5
+    #: 1순위 / 2순위 from the policy file. Kept apart from confidence and risk.
+    tier: int = 0
+    legal_category: str = ""
+    #: Character offset of this occurrence inside the cell value (0-based).
+    match_start: int = -1
+    match_end: int = -1
+    #: 1-based index of this occurrence within the cell, in left-to-right order.
+    occurrence_index: int = 0
+
+    def span(self) -> tuple[int, int]:
+        return (self.match_start, self.match_end)
 
     def as_dict(self) -> dict:
         return {
@@ -146,8 +157,32 @@ class Match:
             "confirmed": self.confirmed,
             "evidence": self.evidence,
             "priority": self.priority,
+            "tier": self.tier or self.priority,
+            "category": self.legal_category,
             "sensitivity": self.sensitivity,
+            "match_start": self.match_start,
+            "match_end": self.match_end,
+            "occurrence": self.occurrence_index,
         }
+
+
+@dataclass(frozen=True)
+class ScanContext:
+    """Row/table context a detector may use besides the column name alone.
+
+    `table_name` is the source file (Function A) or the table name (Function B);
+    `sibling_names` are the other column names of the same table so a value such
+    as "비스포크 오디오" can be read against a GOODS_GROUP column.
+    """
+
+    table_name: str = ""
+    column_names: tuple[str, ...] = ()
+    key_columns: tuple[str, ...] = ()
+    sibling_names: tuple[str, ...] = ()
+
+    def mentions(self, *needles: str) -> bool:
+        haystack = (self.table_name + " " + " ".join(self.column_names)).upper()
+        return any(needle.upper() in haystack for needle in needles)
 
 
 class Detector:
@@ -157,6 +192,7 @@ class Detector:
     display_name: str = "알 수 없음"
     priority: int = 2
     sensitivity: float = 0.5
+    legal_category: str = ""
     candidate_tags: frozenset[str] = frozenset()
     name_hints: tuple[str, ...] = ()
     # Column names that positively identify the column as something else
@@ -164,17 +200,37 @@ class Detector:
     # for such a column on surface form alone.
     negative_hints: tuple[str, ...] = ()
 
-    def column_affinity(self, column_name: str) -> float:
-        """Return 0.0..0.8 based on how strongly the column name hints at this type."""
-        name = column_name.upper()
+    def _column_semantics(self, column_name: str) -> tuple[float, bool, bool, bool]:
+        """(affinity, excluded, identifier-like, device-identifier-like) per column.
+
+        Column names repeat across every cell of a column, so the hint scans are
+        done once per (detector, column) instead of once per cell.
+        """
+        cache = getattr(self, "_column_semantics_cache", None)
+        if cache is None:
+            cache = {}
+            self._column_semantics_cache = cache
+        cached = cache.get(column_name)
+        if cached is not None:
+            return cached
+        name = (column_name or "").upper()
         score = 0.0
         for hint in self.name_hints:
             if hint.upper() in name:
                 score += 0.35
-        return min(score, 0.8)
+        excluded = any(hint.upper() in name for hint in self.negative_hints)
+        cached = (min(score, 0.8), excluded,
+                  any(token in name for token in self.IDENTIFIER_TOKENS),
+                  any(token in name for token in self.DEVICE_TOKENS))
+        cache[column_name] = cached
+        return cached
+
+    def column_affinity(self, column_name: str) -> float:
+        """Return 0.0..0.8 based on how strongly the column name hints at this type."""
+        return self._column_semantics(column_name)[0]
 
     def name_excludes(self, column_name: str) -> bool:
-        return any(hint.upper() in column_name.upper() for hint in self.negative_hints)
+        return self._column_semantics(column_name)[1]
 
     #: Column names that say "this column holds identifiers", not people.
     IDENTIFIER_TOKENS = ("CODE", "REF", "SEQ", "INTERNAL", "SYS", "SKU", "ORDER",
@@ -185,11 +241,11 @@ class Detector:
     DEVICE_TOKENS = ("IMEI", "IMSI", "DEVICE", "TERMINAL", "SUBSCRIBER", "MAC", "UUID")
 
     def identifier_column(self, column_name: str) -> bool:
-        name = (column_name or "").upper()
-        return self.name_excludes(name) or any(token in name for token in self.IDENTIFIER_TOKENS)
+        semantics = self._column_semantics(column_name)
+        return semantics[1] or semantics[2]
 
     def device_identifier_column(self, column_name: str) -> bool:
-        return any(token in (column_name or "").upper() for token in self.DEVICE_TOKENS)
+        return self._column_semantics(column_name)[3]
 
     def contextual_match(self, match: Match, column_name: str, value: str = "") -> Match:
         """Adjust a format match using the column it came from.
@@ -204,24 +260,65 @@ class Detector:
         account layouts) keep their verdict: that shape is not what an arbitrary
         internal code looks like.
         """
-        if match is None or not match.confirmed:
+        if match is None:
             return match
         fragment = (match.fragment or "").strip() or (value or "").strip()
+        #: A masked value can never be confirmed by shape alone: the visible part
+        #: is a fragment of the real one, so the cell goes to review instead of
+        #: being counted as personal data (and is never cleared either).
+        if re.search(r"[*＊●■○]{2,}", fragment) and match.type_key != "MASKED":
+            match.confirmed = False
+            match.confidence = min(match.confidence, 0.60)
+            match.masked = True
+            match.evidence += " (마스킹된 값 - 형식만 근거, 원문 확인 필요)"
         #: A bare run of digits, or a digit template such as "59************1", has
         #: no structure that distinguishes it from an internal identifier. Values
         #: with real segments ("1234-567890123") keep their verdict.
-        if not re.fullmatch(r"[0-9]+|[0-9*＊]{6,}", fragment):
-            return match
-        affinity = self.column_affinity(column_name)
-        if ((self.identifier_column(column_name) or self.device_identifier_column(column_name))
-                and affinity == 0.0):
-            match.confidence = max(0.1, match.confidence - 0.30)
-            match.confirmed = False
-            match.evidence += f" (컬럼 {column_name}은 식별자/코드 컬럼 - 근거 부족)"
+        if match.confirmed and re.fullmatch(r"[0-9]+|[0-9*＊]{6,}", fragment):
+            affinity = self.column_affinity(column_name)
+            if ((self.identifier_column(column_name) or self.device_identifier_column(column_name))
+                    and affinity == 0.0):
+                match.confidence = max(0.1, match.confidence - 0.30)
+                match.confirmed = False
+                match.evidence += f" (컬럼 {column_name}은 식별자/코드 컬럼 - 근거 부족)"
         return match
 
     def match(self, value: str, profile: ValueProfile, column_name: str = "") -> Match | None:
         raise NotImplementedError
+
+    def find_matches(self, value: str, profile: ValueProfile, column_name: str = "",
+                    context: ScanContext | None = None) -> list[Match]:
+        """All occurrences of this type inside one cell.
+
+        `match()` is the single-hit API the engine used before multi-occurrence
+        support; `find_matches()` is the complete one. The default implementation
+        reports the single match with its character offsets. Detectors that can
+        find several occurrences (phones, e-mails, card numbers, ...) override it
+        and must set `match_start` / `match_end` / `occurrence_index`.
+
+        `context` carries the table name and the sibling column names, which is
+        what lets a name-like value be read as a person, a product or a branch.
+        """
+        return self._offset(self.match(value, profile, column_name), value)
+
+    def _offset(self, match: Match | None, value: str) -> list[Match]:
+        """Attach character offsets (and the policy tier) to a whole-cell match."""
+        if match is None:
+            return []
+        if not match.tier:
+            match.tier = self.priority
+        if not match.legal_category:
+            match.legal_category = self.legal_category
+        if match.match_start < 0:
+            text = value or ""
+            fragment = match.fragment or text
+            start = text.find(fragment) if fragment else 0
+            if start < 0:
+                start, fragment = 0, text
+            match.match_start = start
+            match.match_end = start + len(fragment)
+            match.occurrence_index = 1
+        return [match]
 
     def applies(self, profile: ValueProfile) -> bool:
         if "empty" in profile.tags:

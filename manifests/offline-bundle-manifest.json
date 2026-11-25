@@ -1,11 +1,11 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-24T01:18:55.676121+00:00",
+  "generated_at": "2026-11-25T03:38:07.265071+00:00",
   "git": {
-    "commit": "198287197c1dc865c1cb205bc43df2f9d8025f20",
-    "branch": "main",
+    "commit": "114c700e5e82ccedddfd291138d84d3d9de70298",
+    "branch": "dev/pii-policy-accuracy",
     "repository": "https://github.com/gomin90/piiscan.git",
-    "generated_at": "2026-11-24T01:18:55.712400+00:00"
+    "generated_at": "2026-11-25T03:38:07.308348+00:00"
   },
   "target": {
     "windows": {
@@ -32,9 +32,9 @@
       "scorer": "jev_score_v2.cpp"
     }
   },
-  "file_count": 271,
-  "total_bytes": 2653754914,
-  "total_mb": 2530.8,
+  "file_count": 280,
+  "total_bytes": 2653933856,
+  "total_mb": 2531.0,
   "files": [
     {
       "path": ".gitattributes",
@@ -49,6 +49,12 @@
       "category": "other"
     },
     {
+      "path": "CHANGELOG.md",
+      "size": 5746,
+      "sha256": "d2dc635cbb00af4822e7ccce01123e2c0473ec62056daf69fc8497bee6eaa577",
+      "category": "other"
+    },
+    {
       "path": "LICENSE",
       "size": 1197,
       "sha256": "f473944048008166d752b18ec7612548147cc51edfb1cd0b9db054e7c5f1eaf7",
@@ -56,14 +62,14 @@
     },
     {
       "path": "README.md",
-      "size": 9016,
-      "sha256": "511a93bea9fc3be6f1f0e4b6d1e938a829d9e32bc19f3b3c846380afa5f74df8",
+      "size": 9591,
+      "sha256": "466126b9cfe2df471bd9a3e75be191d0d8d884ade88c7f4096cd6eb034d505e6",
       "category": "other"
     },
     {
       "path": "app/__init__.py",
       "size": 107,
-      "sha256": "e32973d349953329a8a86a407fa9bced69a0195e50cd694cecbf0773b539e08a",
+      "sha256": "b38eadecf3d02246a216771deee57689426e5491fa196080442c857dc6dca2a8",
       "category": "app"
     },
     {
@@ -80,8 +86,8 @@
     },
     {
       "path": "app/ai/gpu_detector.py",
-      "size": 20789,
-      "sha256": "be00304797eb153d351682592ecdc6637d0e1ce0badc06d22353b1920fe55871",
+      "size": 20778,
+      "sha256": "5d0463bcee0e6cad5c0cc2b970155599c7a90ed2bb323918a33df796bf36a291",
       "category": "app"
     },
     {
@@ -92,8 +98,8 @@
     },
     {
       "path": "app/ai/jev/adapter.py",
-      "size": 27927,
-      "sha256": "e8054409978ca26898a1bc685c1f1ea9154af62e499bab9692b153b8ee9ac3ef",
+      "size": 28651,
+      "sha256": "19cf6ede179b071b1f537d8ce7f9ad52df8136a15e90936c6582f9b36729950d",
       "category": "app"
     },
     {
@@ -110,8 +116,8 @@
     },
     {
       "path": "app/ai/jev/model_manager.py",
-      "size": 10176,
-      "sha256": "8be0911d4867a9ce6bada2d0a045e07f1f45493627cadfe5992de44323e605c3",
+      "size": 9671,
+      "sha256": "f77d8bf899909972ffb217407370f6b9e2f86b02097c74735fb2a6cb0e7b691a",
       "category": "app"
     },
     {
@@ -128,8 +134,8 @@
     },
     {
       "path": "app/ai/prompt_manager.py",
-      "size": 5297,
-      "sha256": "663004ce4e1c6082069ecada84f65e6b6abbae34f22866388c923077427005d6",
+      "size": 5497,
+      "sha256": "6807ee33c5606f776d4a0ebdcaaa705366199160bca366d3d8a24189cc8b1ccc",
       "category": "app"
     },
     {
@@ -139,9 +145,21 @@
       "category": "app"
     },
     {
+      "path": "app/ai/scorer_resolver.py",
+      "size": 8217,
+      "sha256": "684b7277e8e56d3cf230f05431306bc02189e696ac5c7cdad405bb6c4269d3b6",
+      "category": "app"
+    },
+    {
       "path": "app/config/__init__.py",
       "size": 0,
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "category": "app"
+    },
+    {
+      "path": "app/config/privacy_policy.py",
+      "size": 13713,
+      "sha256": "62e1f9cd7b45d153ce7a3125562995c4f8f7a8e9cec493cbbe655d2c01985b09",
       "category": "app"
     },
     {
@@ -158,14 +176,14 @@
     },
     {
       "path": "app/core/analysis_service.py",
-      "size": 33434,
-      "sha256": "b81e4139d1a065eaa88eec0a816fe5abeb8937d0bcea6bc3a33479e8f88dfb82",
+      "size": 36289,
+      "sha256": "61d815660932639e8c9dc5845e9aa9ffa4a6e5af408cdb9af93e7bd6a0856085",
       "category": "app"
     },
     {
       "path": "app/core/cell_verdict.py",
-      "size": 6645,
-      "sha256": "a83994d8ca2b226dc2d16fddebc4a1a9bec5fb4aef8c7fda4e9698aac49d555f",
+      "size": 7932,
+      "sha256": "031c32bd23bcf334f873e586e9cad9c5ca55213a25ce626793d0d1bc16cabc44",
       "category": "app"
     },
     {
@@ -188,14 +206,14 @@
     },
     {
       "path": "app/core/csv_loader.py",
-      "size": 8182,
-      "sha256": "34f533ec3e37423245b0f31cd1dabef72290b4fc40621e282c7aa143b4fbe154",
+      "size": 9090,
+      "sha256": "9fcf36dda27e37e186f0644873b8291357c2f05503633f7c56f51a8cf639734e",
       "category": "app"
     },
     {
       "path": "app/core/detail_store.py",
-      "size": 61704,
-      "sha256": "11ce51433e2b4e4244258f2e7cdf0d69648f9fe9f1155d1af5f85fec2da9c358",
+      "size": 74594,
+      "sha256": "feb220330a7bde316bc00f5ab0e517171a5a9e4e334e77137ed7f8020360c292",
       "category": "app"
     },
     {
@@ -206,8 +224,8 @@
     },
     {
       "path": "app/core/privacy_engine.py",
-      "size": 27311,
-      "sha256": "c6c24c1a518e1a9d867891cb43afc90d84543aaaa6de6fe4cf8dbc05334cb666",
+      "size": 34740,
+      "sha256": "a8c11d9eced56de46275242e4446f14dd35b92e9e6012eebc3db4cfe8d59cebb",
       "category": "app"
     },
     {
@@ -218,8 +236,8 @@
     },
     {
       "path": "app/core/risk_engine.py",
-      "size": 2862,
-      "sha256": "12002832bbcf53545d22f50c92f50cf2fac3af8cd59cd2f70e4d87b9f5e3dbea",
+      "size": 3807,
+      "sha256": "f8a317539cf59219d2bf386d9a19d7459ec056b620ea1549e8e783b504ef4624",
       "category": "app"
     },
     {
@@ -248,14 +266,14 @@
     },
     {
       "path": "app/detectors/bank_account.py",
-      "size": 2741,
-      "sha256": "942df684e49431b2efb2e1dec70806f18c99c277053bd2999be2f9c1802fb86f",
+      "size": 3228,
+      "sha256": "162069031a0b5397b920abbf01f7217c874eb56c5759c4fe7ec2ea47578f2f1d",
       "category": "app"
     },
     {
       "path": "app/detectors/base.py",
-      "size": 8432,
-      "sha256": "effd931e0a970a45b71151f6a57202a78ac4a6716f5c04bd8d89a8a623b7a45a",
+      "size": 12834,
+      "sha256": "81eab8ffe6cece28ef4d0189e20e9b454b6cec5ca3f616b8c9a9607a34ff073d",
       "category": "app"
     },
     {
@@ -265,33 +283,39 @@
       "category": "app"
     },
     {
+      "path": "app/detectors/context_policy.py",
+      "size": 17149,
+      "sha256": "d411a3aa73cc26e65acd6ba609487faac096b40f79ead674121cfb059b04e111",
+      "category": "app"
+    },
+    {
       "path": "app/detectors/credit_card.py",
-      "size": 1581,
-      "sha256": "f91804552c4d4ea14a48d994eebe4bf877b11394f1b020dacea442d86f713868",
+      "size": 3960,
+      "sha256": "74efb924d098d2a7390228c8887b2d42966d3cdf3ec9b5a219c1d3266203ff91",
       "category": "app"
     },
     {
       "path": "app/detectors/custom_identifier.py",
-      "size": 3859,
-      "sha256": "8258f3e06975efbd1235f9701b214ac496c4125f5bb87493fa64f5d388436eae",
+      "size": 5053,
+      "sha256": "276f3b22613caca6459e1886287c73396ab7988db1eeb57dc8704dc26704ed4d",
       "category": "app"
     },
     {
       "path": "app/detectors/driver_license.py",
-      "size": 2182,
-      "sha256": "05f4bdb5d44e686c39372e71544ea588487a70032ad1461cfabe37bf15d1906d",
+      "size": 3350,
+      "sha256": "7e0f670f17c0ad8f0780f38514f73585d8e6e1f30ade70324bfbfd0ef18eb14f",
       "category": "app"
     },
     {
       "path": "app/detectors/email.py",
-      "size": 997,
-      "sha256": "3d9e9ee0822de12d1cd6d6fc2a3e8a8cdb8d91f293069c0ed25b48add7278242",
+      "size": 1765,
+      "sha256": "36385f3d864ca88bfda5415aa6b959f09d7bb6ae6c09adbfb3e1f040e5526759",
       "category": "app"
     },
     {
       "path": "app/detectors/embedded.py",
-      "size": 6352,
-      "sha256": "edfa91b6c32963174157523f6bbf67682141a040059e756cad9a1980fd70c760",
+      "size": 13595,
+      "sha256": "33838600b33671ed06e80b6ba339eb0987634380fc9c9ad36a5b3f9a53831d1b",
       "category": "app"
     },
     {
@@ -302,8 +326,8 @@
     },
     {
       "path": "app/detectors/foreigner_id.py",
-      "size": 1992,
-      "sha256": "6aed3fccaf23007ecf85051caa08dfebb97293d3363a381b0e3b5141d63a4613",
+      "size": 2277,
+      "sha256": "466f35527c0b3596ad92ce8c2a98a3821845c8f72d060bf1d7a66bf3e1be1c51",
       "category": "app"
     },
     {
@@ -320,8 +344,8 @@
     },
     {
       "path": "app/detectors/imsi.py",
-      "size": 993,
-      "sha256": "d133dee053d7534434f66a945db43c04b692beb7aae89e1e8831abd2e7100566",
+      "size": 1209,
+      "sha256": "463ea38ed9ead8bf5ab7b52547740108692f75addfdc8d77446cbeacf25b769f",
       "category": "app"
     },
     {
@@ -332,38 +356,38 @@
     },
     {
       "path": "app/detectors/location.py",
-      "size": 3413,
-      "sha256": "0fa5810a76a595d019efdfafad6c44656b166d5500b76e8333187222df680eb5",
+      "size": 4238,
+      "sha256": "96260d00417e54129cbb1ef16668234626827710cc0a6ffd6078c4eae16f919a",
       "category": "app"
     },
     {
       "path": "app/detectors/low_priority.py",
-      "size": 5415,
-      "sha256": "ca7fac4829dac95a8c77803a90be17b8da0b21d4127b1a0da3a55c0e2cfb35ad",
+      "size": 6797,
+      "sha256": "428a98a5e0ac23f07e654faa45eae98a137c06012e40b4f7394e5b3a8f6dfab4",
       "category": "app"
     },
     {
       "path": "app/detectors/name.py",
-      "size": 2752,
-      "sha256": "50ef5889170626bba6512a43f87ebbb803e21d8020435ff5967927fcbbbeea13",
+      "size": 6994,
+      "sha256": "27a7447835255a17d85459e68f5a2fe8707be2b0c90d9a50d52a019a1f06d37b",
       "category": "app"
     },
     {
       "path": "app/detectors/passport.py",
-      "size": 2496,
-      "sha256": "059cb382fbee32bbfd752ccb5d7eb3cdcec8267b1139855339e8e766f5665802",
+      "size": 2977,
+      "sha256": "1d37d7134237435d63d559b51f2103cc83dc8e20d5875c8d87199774825f9c5c",
       "category": "app"
     },
     {
       "path": "app/detectors/phone.py",
-      "size": 1854,
-      "sha256": "3158ccd14708a46120ad99ad2b4f6428aadb0b97d75ab6b9c8b2de74b8a62edb",
+      "size": 3716,
+      "sha256": "c30513875b5dfbceaa36bab15b5d58a8c5a0ceb90a962f678128598b89fae68a",
       "category": "app"
     },
     {
       "path": "app/detectors/resident_id.py",
-      "size": 1849,
-      "sha256": "2d7375eee8dab80ca9368e800d716a71656af836d0587dea34334a5e5b36db8b",
+      "size": 2856,
+      "sha256": "cbc3c3a35b78da3a61bb18427fe97fdfa69f8dd2dcf40bfcb7a06b3d4118297e",
       "category": "app"
     },
     {
@@ -386,8 +410,8 @@
     },
     {
       "path": "app/export/hit_exporter.py",
-      "size": 17774,
-      "sha256": "1c58e5baf2f81677c3d77d8e892c0c6e7daabbb944192b773a635cb57a80b7b1",
+      "size": 19393,
+      "sha256": "3856b0cbe5a98b3bca8457778b745897f772f728b149428a9dd73ae7935a44f6",
       "category": "app"
     },
     {
@@ -422,8 +446,8 @@
     },
     {
       "path": "app/metadata_analysis/metadata_service.py",
-      "size": 14448,
-      "sha256": "33ab70ec34efdd4c8fee5d270713322b106047c70cc4354d57df94f3b62a9723",
+      "size": 15627,
+      "sha256": "c96f1974142259f66159497ed81fb226803d90e2126b0e8dcfdc47324729860b",
       "category": "app"
     },
     {
@@ -488,8 +512,8 @@
     },
     {
       "path": "app/ui/result_window.py",
-      "size": 25812,
-      "sha256": "68622942b9a3314ffa069efbd9ceb73836332e9c7d9943a6db34a70dd139b632",
+      "size": 26087,
+      "sha256": "8c302b7cb96746fa51157d7e37b1867b75e49215d68aa5fddf91dfc40ed751d8",
       "category": "app"
     },
     {
@@ -530,8 +554,8 @@
     },
     {
       "path": "app/utils/masking.py",
-      "size": 1963,
-      "sha256": "95e6a320ab346d5733d45b786819ca6f3525a65b42bced71b2ec6f161f8454cf",
+      "size": 2071,
+      "sha256": "cbfed593ff28157dcf0f1ca2d8d693f26fec212913df1d16bd911f71014523d4",
       "category": "app"
     },
     {
@@ -584,8 +608,8 @@
     },
     {
       "path": "docs/two-mode-analysis-design.md",
-      "size": 54199,
-      "sha256": "b63c9e5e0bcd5bfd94ecab545e4b751ec096a4c153abc660bf7eb17dc1ec7dba",
+      "size": 62321,
+      "sha256": "e509af3e0882ff4baa9ab1a8776659415bac7549c3a2d2a1d4815c64e47f67ad",
       "category": "docs"
     },
     {
@@ -794,8 +818,14 @@
     },
     {
       "path": "resources/rules/custom_patterns.json",
-      "size": 1440,
-      "sha256": "c29a6af6acf4b885c4be3cf7aea03249e2b95e4eded99235d59b8766aff7bdf9",
+      "size": 2324,
+      "sha256": "6039cb2e00bf3c644bc422382dd4c6e9bc39bfdf8d9cfd62e35bb670a47d586e",
+      "category": "resources"
+    },
+    {
+      "path": "resources/rules/privacy_kr_2026.json",
+      "size": 19925,
+      "sha256": "a9d617dc98e5e88efb45fbe63e12a342a46964f8279e89853c0c25a8f0321620",
       "category": "resources"
     },
     {
@@ -980,8 +1010,8 @@
     },
     {
       "path": "scripts/windows/gpu-check.ps1",
-      "size": 9229,
-      "sha256": "e7eb0ee500df97feccb310b0ca4043aa004f070e671e2df57172215ffec27d88",
+      "size": 11072,
+      "sha256": "0d89a78b1b554066a7d02fd0f4bc92e74e9319e370bffdf810f40a0a9ffeb225",
       "category": "scripts"
     },
     {
@@ -1028,8 +1058,14 @@
     },
     {
       "path": "tests/fixtures/gold_cells.py",
-      "size": 8506,
-      "sha256": "4874e18d7600a9983a2a483b09cfae6545ed849f3238177e35065a796d9284be",
+      "size": 12270,
+      "sha256": "f7146f44b5037b816168ce7621f17689ca44b0a42dfe037aa98f9263f2d3e909",
+      "category": "fixtures"
+    },
+    {
+      "path": "tests/fixtures/gold_generated.py",
+      "size": 12458,
+      "sha256": "d5484ee63257e8e07f9c9ba0af572a04ef63d82eedfd1a3ddf51ce3555907c05",
       "category": "fixtures"
     },
     {
@@ -1088,8 +1124,8 @@
     },
     {
       "path": "tests/qa/metrics.py",
-      "size": 11449,
-      "sha256": "91360e7ad6854bf5b12ee437181689e4d0e5d0844c2ca721c4d86d44c22c4629",
+      "size": 11678,
+      "sha256": "936a3b4e7c80fd6f9976015b0df0ea8980ca8ac6bb9c38c941296a9b21739e48",
       "category": "other"
     },
     {
@@ -1165,6 +1201,18 @@
       "category": "other"
     },
     {
+      "path": "tests/qa/test_policy_detectors.py",
+      "size": 10458,
+      "sha256": "32356567c5aa026244a46a96ab9fb75536aea99239b03e63d963ad03d603a364",
+      "category": "other"
+    },
+    {
+      "path": "tests/qa/test_release_gaps.py",
+      "size": 9211,
+      "sha256": "f58a887e633dd5fdc3d18a68af33d79f67ff882128f0f8562cbe428cbcb38ffa",
+      "category": "other"
+    },
+    {
       "path": "tests/qa/test_resume_checkpoint.py",
       "size": 3399,
       "sha256": "b374d8559947106eadf61c5c1bc373c4d1e09b9ee30d656a690910a13ad99467",
@@ -1189,9 +1237,15 @@
       "category": "other"
     },
     {
+      "path": "tests/qa/test_scorer_resolver.py",
+      "size": 3939,
+      "sha256": "8cec2fde6d5de430c6272ca4f465252c31014bb6d7e13ea7ecb8559871fbb7fa",
+      "category": "other"
+    },
+    {
       "path": "tests/qa/test_stabilization.py",
-      "size": 28301,
-      "sha256": "9ee5121755ed3443ce9ef9addf36639442cf26f1c14130b393b1543cebd2824a",
+      "size": 28899,
+      "sha256": "c6822211463a69225e9659e072cb37c73c6c68cd9bccd4293afd9dd55c7b46e0",
       "category": "other"
     },
     {
@@ -1214,8 +1268,8 @@
     },
     {
       "path": "tests/unit/test_csv_format.py",
-      "size": 2126,
-      "sha256": "15c400cdf64ea916aac76bd7e186312547ad145dfed855ce6db0058d22eb6cd4",
+      "size": 2132,
+      "sha256": "9d5b0f4bcb341b626f2ff5fd08d631cf9721e9eeecdb64bb61ea0989d1404807",
       "category": "other"
     },
     {
@@ -1256,8 +1310,8 @@
     },
     {
       "path": "tools/build.py",
-      "size": 6934,
-      "sha256": "4f760ffede1bf9ae7d8482a63354a6b2337b88ed9552b874970a33d1fc5ddcc8",
+      "size": 9210,
+      "sha256": "082c84caee497a5f4790914ccf61bb704b3676ed8d84ed116f144dc9ba557a34",
       "category": "other"
     },
     {
@@ -1268,8 +1322,8 @@
     },
     {
       "path": "tools/gold_accuracy.py",
-      "size": 7579,
-      "sha256": "40fa9e9153909c1a5546650bb9b1a6d86fc14172bc58d2258aa9f5fd580ba719",
+      "size": 9564,
+      "sha256": "2c7fbc4714a54dcd04148f3907777740e85a17960dc477a977f6e01103347e77",
       "category": "other"
     },
     {

@@ -28,6 +28,7 @@ from app.ai.jev.decision import (
     JevStyleDecisionRequest,
     JevStyleDecisionResult,
 )
+from app.ai.scorer_resolver import inference_report
 from app.ai.jev.model_manager import JevStyleModelSpec
 from app.utils.masking import MASK_CHARS, mask_value
 
@@ -589,4 +590,14 @@ class JevStyleAdapter:
             "context_limit": self.spec.context_limit if self.spec else 0,
             "scorer_info": self.scorer_info,
             "error": self.last_error,
+            # Spec section 8: one machine-readable record of which scorer actually ran,
+            # which backend library it loaded, and why it fell back when it did.
+            "inference_report": inference_report(
+                self.spec.scorer_path if self.spec else None,
+                gpu_model=getattr(self.hardware, "gpu_model", "") or "",
+                compute_capability=getattr(self.hardware, "gpu_compute_arch", "") or "",
+                requested_ngl=(self.gpu_report or {}).get("requested_ngl", self.gpu_layers),
+                layers_on_gpu=(self.gpu_report or {}).get("layers_on_gpu", "cpu"),
+                backend=self.backend,
+            ),
         }

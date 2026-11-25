@@ -26,14 +26,31 @@ class DriverLicenseDetector(Detector):
                         evidence="운전면허번호 마스킹 패턴", priority=self.priority, sensitivity=self.sensitivity)
         if KR_RE.match(v):
             digits = digits_only(v)
-            # 국내면허번호: 8자리(발급년+순번) + 2자리(지청)
-            if len(digits) == 10 and 1900 <= int(digits[:4]) <= 2100:
-                return Match(self.type_key, self.display_name, 0.88,
-                            evidence="8-2 자리 국내 면허번호 형식", priority=self.priority, sensitivity=self.sensitivity)
-            # 10자 숫자만으로는 면허번호라 확정할 수 없다: 컬럼 이름 근거 필요.
-            if self.column_affinity(column_name) >= 0.35:
-                return Match(self.type_key, self.display_name, 0.6,
+            # The hyphenated 8-2 layout is the printed domestic form and is
+            # specific enough to confirm on its own.
+            year = int(digits[:4])
+            # A 10-digit run that does not begin with a plausible issuance year
+            # (1234567890) is an order/SN value, never a domestic licence.
+            if len(digits) == 10 and not (1900 <= year <= 2025):
+                return None
+            if "-" in v and len(digits) == 10 and 1900 <= year <= 2100:
+                # An issuance year in the future can not be a domestic licence.
+                if year <= 2025:
+                    return Match(self.type_key, self.display_name, 0.88,
+                                 evidence="8-2 자리 국내 면허번호 형식",
+                                 priority=self.priority, sensitivity=self.sensitivity)
+                return Match(self.type_key, self.display_name, 0.6, confirmed=False,
+                             evidence=f"면허 형식 nhưng 발급년 {year} 비현실적 (검토 필요)",
+                             priority=self.priority, sensitivity=self.sensitivity)
+            # A bare 10-digit run also fits foreigner IDs, order numbers and
+            # internal keys, so it needs the column name to back it up.
+            if len(digits) == 10 and self.column_affinity(column_name) >= 0.35 and year <= 2025:
+                return Match(self.type_key, self.display_name, 0.7,
                             evidence="면허 컬럼 이름 + 10자리 숫자",
+                            priority=self.priority, sensitivity=self.sensitivity)
+            if len(digits) == 10:
+                return Match(self.type_key, self.display_name, 0.6, confirmed=False,
+                            evidence="10자리 숫자: 면허번호와 내부 코드 구분 불가 (검토 필요)",
                             priority=self.priority, sensitivity=self.sensitivity)
             return None
         if OLD_RE.match(v) and self.column_affinity(column_name) >= 0.35:

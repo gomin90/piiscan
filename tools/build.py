@@ -3,8 +3,16 @@
     python tools/build.py --target macos
     python tools/build.py --target windows --debug
 
-Builds a single-file executable with PyInstaller and bundles the GGUF model,
-resources and native libraries. Model integrity is verified with SHA256.
+Builds a single-file executable with PyInstaller and bundles the resources and
+native libraries. Model integrity is verified with SHA256.
+
+GGUF weights are NOT embedded in the `--onefile` executable: a 0.8 GB / 1.3 GB
+weight file inside a single-file EXE makes start-up expand the whole archive and
+makes the base package far bigger than the code it ships. By default the base
+build carries code + scorer + tokenizer only, and the weights ship as the
+se optional model packages produced by `tools/make_release_bundle.py --split`
+(piiscan-app.zip / piiscan-model-0.8b.zip / piiscan-model-2b.zip). Pass
+`--embed-models` only when a truly single-file artifact is required.
 """
 from __future__ import annotations
 
@@ -86,7 +94,39 @@ def run_tests() -> bool:
     return result.returncode == 0
 
 
-def build(target: str, debug: bool, skip_tests: bool = False, rule_only: bool = False) -> int:
+def staged_models_root() -> Path:
+    """Copy the model tree without the GGUF weights, for `--add-data`.
+
+    Scorer binaries, tokenizers and readout configs stay: the offline AI layer
+    needs them, and they are small. Only the multi-hundred-MB weights are left
+    out so the base executable stays a base executable.
+    """
+    stage = ROOT / "dist" / "models-stage"
+    models = ROOT / "models"
+    if not models.exists():
+        return stage
+    if stage.exists():
+        shutil.rmtree(stage)
+    stage.mkdir(parents=True, exist_ok=True)
+    skipped: list[str] = []
+    for path in models.rglob("*"):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() == ".gguf":
+            skipped.append(str(path.relative_to(ROOT)))
+            continue
+        dest = stage / path.relative_to(models)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, dest)
+    if skipped:
+        print(f"[packaging] GGUF weights not embedded in the onefile EXE "
+              f"({len(skipped)} files, ship them as separate model packages): "
+              + ", ".join(skipped))
+    return stage
+
+
+def build(target: str, debug: bool, skip_tests: bool = False, rule_only: bool = False,
+          embed_models: bool = False) -> int:
     if not rule_only and (not verify_models() or not verify_jev_models()):
         return 1
     if not check_environment():
@@ -104,7 +144,10 @@ def build(target: str, debug: bool, skip_tests: bool = False, rule_only: bool = 
         f"--add-data={ROOT / 'resources'}{pathsep()}resources",
     ]
     if not rule_only:
-        args.append(f"--add-data={ROOT / 'models'}{pathsep()}models")
+        if embed_models:
+            args.append(f"--add-data={ROOT / 'models'}{pathsep()}models")
+        else:
+            args.append(f"--add-data={staged_models_root()}{pathsep()}models")
         runtime = ROOT / "runtime"
         if runtime.exists():
             # runtime/windows/{jev-score.exe, llama.dll, ...} for the offline AI layer
@@ -149,6 +192,9 @@ def main() -> int:
     parser.add_argument("--verify-only", action="store_true", help="검증만 수행 (빌드하지 않음)")
     parser.add_argument("--skip-tests", action="store_true", help="pytest 생략")
     parser.add_argument("--rule-only", action="store_true", help="모델 없이 규칙 엔진만 번들")
+    parser.add_argument("--embed-models", action="store_true",
+                        help="GGUF weights inside the onefile EXE (not recommended; "
+                             "the base package is then multiple GB)")
     args = parser.parse_args()
     if args.verify_only:
         return 0 if (verify_models() and verify_jev_models() and check_environment()) else 1
@@ -158,7 +204,8 @@ def main() -> int:
     if args.target != current:
         print(f"[error] {args.target} artifacts must be built on {args.target}; this machine is {current}.")
         return 1
-    code = build(args.target, args.debug, skip_tests=args.skip_tests, rule_only=args.rule_only)
+    code = build(args.target, args.debug, skip_tests=args.skip_tests, rule_only=args.rule_only,
+                 embed_models=args.embed_models)
     if code == 0:
         report_bundle_size(args.target)
     return code
@@ -170,12 +217,13 @@ def report_bundle_size(target: str) -> None:
         print("[error] built binary not found")
         return
     size_mb = binary.stat().st_size / (1024 ** 2)
-    model_bytes = 0
-    jev = ROOT / "models" / "jev-style"
-    if jev.exists():
-        model_bytes = sum(p.stat().st_size for p in jev.rglob("*") if p.is_file())
+    staged = staged_models_root()
+    staged_bytes = sum(p.stat().st_size for p in staged.rglob("*") if p.is_file())
+    gguf_bytes = sum(p.stat().st_size for p in (ROOT / "models").rglob("*")
+                     if p.is_file() and p.suffix.lower() == ".gguf")
     print(f"[size] {binary.name}: {size_mb:.1f} MB "
-          f"(bundled Jev-Style model+scorer data: {model_bytes / (1024 ** 2):.1f} MB)")
+          f"(bundled scorer/tokenizer/runtime data: {staged_bytes / (1024 ** 2):.1f} MB; "
+          f"GGUF weights delivered separately: {gguf_bytes / (1024 ** 2):.1f} MB)")
 
 
 if __name__ == "__main__":

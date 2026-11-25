@@ -16,11 +16,31 @@ class EmailDetector(Detector):
     candidate_tags = frozenset({"email"})
     name_hints = ("EMAIL", "MAIL", "이메일", "E_MAIL")
 
+    def _one(self, text: str) -> Match | None:
+        local, _, domain = text.partition("@")
+        if not domain:
+            return None
+        masked = "*" in local or "*" in domain
+        return Match(self.type_key, self.display_name, 0.75 if masked else 0.97,
+                     masked=masked, evidence="이메일 형식", fragment=text,
+                     priority=self.priority, sensitivity=self.sensitivity)
+
     def match(self, value: str, profile: ValueProfile, column_name: str = "") -> Match | None:
         v = value.strip()
         if not EMAIL_RE.fullmatch(v) and not MASKED_EMAIL_RE.fullmatch(v):
             return None
-        local, domain = v.split("@", 1)
-        masked = "*" in local or "*" in domain
-        return Match(self.type_key, self.display_name, 0.75 if masked else 0.97,
-                     masked=masked, evidence="이메일 형식", priority=self.priority, sensitivity=self.sensitivity)
+        return self._one(v)
+
+    def find_matches(self, value: str, profile: ValueProfile, column_name: str = "",
+                     context=None) -> list[Match]:
+        """Every e-mail address in the cell (a cell may hold several)."""
+        out: list[Match] = []
+        for index, found in enumerate(EMAIL_RE.finditer(value or ""), start=1):
+            match = self._one(found.group(0))
+            if match is None:
+                continue
+            match.match_start = found.start()
+            match.match_end = found.end()
+            match.occurrence_index = index
+            out.append(match)
+        return out

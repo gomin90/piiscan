@@ -65,6 +65,10 @@ class CsvLoader:
         self.oversized_fields = 0
         self.field_limit = 0
         self.unparsed_rows = 0
+        self.blank_lines = 0
+        # Physical lines of records that could not be parsed (bounded - the full
+        # file is never kept in memory).
+        self.skipped_lines: list[tuple[int, int]] = []
         self.column_count = 0
         self.header_length = 0
         self.column_names: list[str] = []
@@ -136,8 +140,13 @@ class CsvLoader:
         return self.settings.header_start_row
 
     def iter_rows(self):
-        """Yield (row_index, row).
+        """Yield `(row_index, row, source_line_start, source_line_end)`.
 
+        `row_index` is the logical record number used everywhere in the reports
+        (1-based, after the header). `source_line_start` / `source_line_end` are
+        the **physical** lines of the file the record was read from: a quoted
+        field that spans three lines occupies three lines, and skipped blank or
+        malformed lines never shift the logical number onto the wrong record.
         Short rows are padded to the header width. Rows with *more* fields than the
         header are yielded intact: truncating them would discard cells that may hold
         personal data, so the extra fields are analysed as EXTRA_COL_n columns and the
@@ -161,6 +170,7 @@ class CsvLoader:
                         self.row_errors.append(f"헤더 Row parse error: {exc}")
             index = 0
             while True:
+                line_start = reader.line_num + 1
                 try:
                     raw = next(reader)
                 except StopIteration:
@@ -170,14 +180,17 @@ class CsvLoader:
                     # caught here or the whole file analysis aborts.
                     self.error_rows += 1
                     self.unparsed_rows += 1
+                    self.skipped_lines.append((line_start, max(reader.line_num, line_start)))
                     message = str(exc)
                     if "field larger than field limit" in message:
                         self.oversized_fields += 1
                     if len(self.row_errors) < 50:
                         self.row_errors.append(f"행 {index}: {message}")
                     continue
+                line_end = max(reader.line_num, line_start)
                 if not raw or all(not cell.strip() for cell in raw):
                     self.empty_rows += 1
+                    self.blank_lines += 1
                     continue
                 width = len(raw)
                 reference = self.header_length or self.column_count
@@ -190,7 +203,7 @@ class CsvLoader:
                 if width != reference:
                     self.irregular_rows += 1
                 self.parsed_rows += 1
-                yield index, raw
+                yield index, raw, line_start, line_end
                 index += 1
 
     def progress_total(self) -> int:

@@ -41,6 +41,7 @@ import threading
 from pathlib import Path
 from typing import Iterable
 
+from app.config.privacy_policy import get_policy
 from app.core.column_stats import Hit
 from app.core.cell_verdict import (
     CODE_CLEARED_BASE, CODE_DETAIL, CODE_EMPTY, CODE_KEY, NON_PERSONAL_LABELS,
@@ -52,54 +53,71 @@ CELL_FIELDS = (
     "row", "column_index", "column", "type_key", "display_name", "decision", "confidence",
     "masked_value", "evidence", "needs_review", "column_support", "name_hint",
     "cells_checked", "confirmed", "masked", "sensitivity", "priority",
+    "tier", "category", "match_start", "match_end", "occurrence_index",
 )
 
 VERDICT_FIELDS = (
     "row", "column_index", "column", "cell_status", "privacy_types", "rule_verdict",
     "ai_verdict", "final_verdict", "confidence", "decision_method", "needs_review",
-    "masked_value", "evidence",
+    "masked_value", "evidence", "tier", "occurrences", "semantic_signature",
+    "context_class", "line_start", "line_end",
 )
 
 ROW_FIELDS = (
     "row", "has_pii", "status", "confirmed_pii", "possible_pii", "column_names",
     "column_indexes", "cell_count", "basis", "confidence", "risk_level",
-    "needs_review", "ai_review", "cells_checked",
+    "needs_review", "ai_review", "cells_checked", "line_start", "line_end", "key_mask",
 )
 
+# `line_start` / `line_end` come from the scan ledger so every report row can point
+# at the physical source line of the record, not just its logical row number. The
+# correlated subqueries keep `row` unambiguous for callers that append their own
+# WHERE / ORDER BY clauses.
 ROW_SELECT = (
-    "SELECT row, has_pii, status, confirmed_pii, possible_pii, column_names, "
-    "column_indexes, cell_count, basis, confidence, risk_level, needs_review, "
-    "ai_review, cells_checked FROM row_detail WHERE analysis_id = ?"
+    "SELECT r.row, r.has_pii, r.status, r.confirmed_pii, r.possible_pii, r.column_names, "
+    "r.column_indexes, r.cell_count, r.basis, r.confidence, r.risk_level, r.needs_review, "
+    "r.ai_review, r.cells_checked, "
+    "(SELECT s.line_start FROM row_status s "
+    " WHERE s.analysis_id = r.analysis_id AND s.table_id = r.table_id AND s.row = r.row), "
+    "(SELECT s.line_end FROM row_status s "
+    " WHERE s.analysis_id = r.analysis_id AND s.table_id = r.table_id AND s.row = r.row), "
+    "(SELECT s.key_mask FROM row_status s "
+    " WHERE s.analysis_id = r.analysis_id AND s.table_id = r.table_id AND s.row = r.row) "
+    "FROM row_detail r WHERE r.analysis_id = ?"
 )
 
 # Every cell with evidence (rule match, undecided cell or AI judgement).
 INFO_SELECT = (
     "SELECT row, column_index, column, cell_status, privacy_types, rule_verdict, "
     "ai_verdict, final_verdict, confidence, decision_method, needs_review, masked_value, "
-    "evidence FROM cell_info WHERE analysis_id = ?"
+    "evidence, tier, occurrences, semantic_signature, context_class, line_start, line_end "
+    "FROM cell_info WHERE analysis_id = ?"
 )
 
 CELL_SELECT = (
     "SELECT row, column_index, column, type_key, display_name, decision, confidence, "
     "masked_value, evidence, needs_review, column_support, name_hint, cells_checked, "
-    "confirmed, masked, sensitivity, priority FROM cell_detail WHERE decision <> ''"
+    "confirmed, masked, sensitivity, priority, tier, category, match_start, match_end, "
+    "occurrence_index FROM cell_detail WHERE decision <> ''"
 )
 
 CELL_SELECT_RANGE = (
     "SELECT row, column_index, column, type_key, display_name, decision, confidence, "
     "masked_value, evidence, needs_review, column_support, name_hint, cells_checked, "
-    "confirmed, masked, sensitivity, priority FROM cell_detail "
+    "confirmed, masked, sensitivity, priority, tier, category, match_start, match_end, "
+    "occurrence_index FROM cell_detail "
     "WHERE analysis_id = ? AND decision <> '' AND row >= ? AND row <= ? "
-    "ORDER BY row, column_index"
+    "ORDER BY row, column_index, occurrence_index"
 )
 
 CELL_WITH_ROW = (
     "SELECT c.row, c.column_index, c.column, c.type_key, c.display_name, c.decision, "
     "c.confidence, c.masked_value, c.evidence, c.needs_review, c.column_support, "
     "c.name_hint, c.cells_checked, c.confirmed, c.masked, c.sensitivity, c.priority, "
+    "c.tier, c.category, c.match_start, c.match_end, c.occurrence_index, "
     "r.status, r.confirmed_pii, r.possible_pii, r.basis, r.risk_level, r.ai_review "
     "FROM cell_detail c JOIN row_detail r ON r.analysis_id = c.analysis_id AND r.row = c.row "
-    "WHERE c.analysis_id = ? AND c.decision <> '' ORDER BY c.row, c.column_index"
+    "WHERE c.analysis_id = ? AND c.decision <> '' ORDER BY c.row, c.column_index, c.occurrence_index"
 )
 
 # Statuses that live in `cell_info`; the rest are derived from the status byte.
@@ -150,7 +168,9 @@ class DetailStore:
             "CREATE TABLE IF NOT EXISTS row_status ("
             "analysis_id TEXT NOT NULL, table_id INTEGER NOT NULL, row INTEGER NOT NULL, "
             "width INTEGER NOT NULL, status BLOB NOT NULL, key_fingerprint TEXT NOT NULL DEFAULT '', "
-            "row_key TEXT NOT NULL DEFAULT '', PRIMARY KEY (analysis_id, table_id, row))"
+            "row_key TEXT NOT NULL DEFAULT '', key_mask TEXT NOT NULL DEFAULT '', "
+            "line_start INTEGER NOT NULL DEFAULT 0, "
+            "line_end INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (analysis_id, table_id, row))"
         )
         self._exec(
             "CREATE INDEX IF NOT EXISTS idx_row_status_row "
@@ -166,6 +186,12 @@ class DetailStore:
             "confidence REAL NOT NULL DEFAULT 0, decision_method TEXT NOT NULL DEFAULT '', "
             "needs_review INTEGER NOT NULL DEFAULT 0, masked_value TEXT NOT NULL DEFAULT '', "
             "evidence TEXT NOT NULL DEFAULT '', fingerprint TEXT NOT NULL DEFAULT '', "
+            "tier INTEGER NOT NULL DEFAULT 2, priority INTEGER NOT NULL DEFAULT 0, "
+            "semantic_signature TEXT NOT NULL DEFAULT '', context_class TEXT NOT NULL DEFAULT '', "
+            "occurrences INTEGER NOT NULL DEFAULT 0, "
+            "match_start INTEGER NOT NULL DEFAULT -1, match_end INTEGER NOT NULL DEFAULT -1, "
+            "spans TEXT NOT NULL DEFAULT '', "
+            "line_start INTEGER NOT NULL DEFAULT 0, line_end INTEGER NOT NULL DEFAULT 0, "
             "PRIMARY KEY (analysis_id, table_id, row, column_index))"
         )
         self._exec(
@@ -188,6 +214,9 @@ class DetailStore:
             "column TEXT, type_key TEXT, display_name TEXT, raw_confidence REAL, "
             "masked_value TEXT, evidence TEXT, confirmed INTEGER, masked INTEGER, "
             "sensitivity REAL, priority INTEGER, name_hint REAL, cells_checked INTEGER, "
+            "tier INTEGER NOT NULL DEFAULT 0, category TEXT NOT NULL DEFAULT '', "
+            "match_start INTEGER NOT NULL DEFAULT -1, match_end INTEGER NOT NULL DEFAULT -1, "
+            "occurrence_index INTEGER NOT NULL DEFAULT 0, "
             "decision TEXT DEFAULT '', confidence REAL DEFAULT 0, "
             "needs_review INTEGER DEFAULT 0, column_support REAL DEFAULT 0, "
             "fingerprint TEXT NOT NULL DEFAULT '')"
@@ -257,6 +286,31 @@ class DetailStore:
                 "CREATE INDEX IF NOT EXISTS idx_column_verdict_status "
                 "ON column_verdicts(analysis_id, verdict, table_name)"
             )
+        # Columns added after Layout D shipped: existing detail stores keep their
+        # data and simply get the new, defaulted columns.
+        for table, column, definition in (
+            ("row_status", "line_start", "INTEGER NOT NULL DEFAULT 0"),
+            ("row_status", "line_end", "INTEGER NOT NULL DEFAULT 0"),
+            ("row_status", "key_mask", "TEXT NOT NULL DEFAULT ''"),
+            ("cell_info", "tier", "INTEGER NOT NULL DEFAULT 2"),
+            ("cell_info", "priority", "INTEGER NOT NULL DEFAULT 0"),
+            ("cell_info", "semantic_signature", "TEXT NOT NULL DEFAULT ''"),
+            ("cell_info", "context_class", "TEXT NOT NULL DEFAULT ''"),
+            ("cell_info", "occurrences", "INTEGER NOT NULL DEFAULT 0"),
+            ("cell_info", "match_start", "INTEGER NOT NULL DEFAULT -1"),
+            ("cell_info", "match_end", "INTEGER NOT NULL DEFAULT -1"),
+            ("cell_info", "spans", "TEXT NOT NULL DEFAULT ''"),
+            ("cell_info", "line_start", "INTEGER NOT NULL DEFAULT 0"),
+            ("cell_info", "line_end", "INTEGER NOT NULL DEFAULT 0"),
+            ("cell_detail", "tier", "INTEGER NOT NULL DEFAULT 0"),
+            ("cell_detail", "category", "TEXT NOT NULL DEFAULT ''"),
+            ("cell_detail", "match_start", "INTEGER NOT NULL DEFAULT -1"),
+            ("cell_detail", "match_end", "INTEGER NOT NULL DEFAULT -1"),
+            ("cell_detail", "occurrence_index", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            existing = {row[1] for row in self._exec(f"PRAGMA table_info({table})")}
+            if column not in existing:
+                self._exec(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
         # Re-analysing the same file into a shared store replaces that file's own
         # records instead of colliding with a previous run - unless the run is a
         # resume, in which case the checkpoint rows are exactly what must survive.
@@ -277,6 +331,7 @@ class DetailStore:
         self.raw_cell_count = 0
         self.rows_with_detail = 0
         self.decided_cells = 0
+        self.rule_verdict_cells = 0
         self.verdict_records = 0
         self.key_cells = 0
         self.empty_cells = 0
@@ -425,7 +480,9 @@ class DetailStore:
                          types: Iterable[str] = (), rule_verdict: str = "",
                          masked_value: str = "", confidence: float = 0.0,
                          decision_method: str = "규칙", needs_review: bool = False,
-                         evidence: str = "", fingerprint: str = "") -> None:
+                         evidence: str = "", fingerprint: str = "", tier: int = 2,
+                         semantic_signature: str = "", context_class: str = "",
+                         occurrences: int = 0, line_start: int = 0, line_end: int = 0) -> None:
         """Record the verdict of one cell.
 
         Cells that need no explanation (empty, KEY-excluded, positively cleared by
@@ -446,6 +503,8 @@ class DetailStore:
                 self.analysis_id, self.table_id, row, column_index, column, status,
                 ",".join(types), rule_verdict, "", "", round(confidence, 3),
                 decision_method, int(needs_review), masked_value, evidence, fingerprint,
+                tier, 1 if tier == 1 else 0, semantic_signature, context_class,
+                occurrences, line_start, line_end,
             ))
             if len(self._info_buffer) >= self._info_limit:
                 self.flush_cell_info()
@@ -464,12 +523,19 @@ class DetailStore:
             (self.analysis_id, self.table_id, row, 0, b"", fingerprint, row_key),
         )
 
-    def close_row(self, key_fingerprint: str = "", row_key: str = "") -> None:
-        """Finish one source row: write its status bytes plus its KEY fingerprint."""
+    def close_row(self, key_fingerprint: str = "", row_key: str = "",
+                  line_start: int = 0, line_end: int = 0, key_mask: str = "") -> None:
+        """Finish one source row: write its status bytes plus its KEY fingerprint.
+
+        `line_start` / `line_end` are the physical lines of the source file this
+        logical record came from, so a report can point at the real line even when
+        blank or malformed lines were skipped.
+        """
         if self._current_row is None:
             return
         self._row_buffer.append((self.analysis_id, self.table_id, self._current_row,
-                                 len(self._codes), bytes(self._codes), key_fingerprint, row_key))
+                                 len(self._codes), bytes(self._codes), key_fingerprint, row_key,
+                                 line_start, line_end, key_mask))
         self._current_row = None
         self._codes = bytearray()
         if len(self._row_buffer) >= self._row_limit:
@@ -479,7 +545,7 @@ class DetailStore:
         if self._current_row is None or not self._codes:
             return
         self._row_buffer.append((self.analysis_id, self.table_id, self._current_row,
-                                 len(self._codes), bytes(self._codes), "", ""))
+                                 len(self._codes), bytes(self._codes), "", "", 0, 0, ""))
         if len(self._row_buffer) >= self._row_limit:
             self._flush_rows()
 
@@ -488,7 +554,8 @@ class DetailStore:
             return
         self._exec_many(
             "INSERT OR REPLACE INTO row_status (analysis_id, table_id, row, width, status, "
-            "key_fingerprint, row_key) VALUES (?,?,?,?,?,?,?)",
+            "key_fingerprint, row_key, line_start, line_end, key_mask) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             self._row_buffer,
         )
         self._row_buffer.clear()
@@ -499,8 +566,9 @@ class DetailStore:
             self._exec_many(
                 "INSERT OR REPLACE INTO cell_info (analysis_id, table_id, row, column_index, column, "
                 "cell_status, privacy_types, rule_verdict, ai_verdict, final_verdict, confidence, "
-                "decision_method, needs_review, masked_value, evidence, fingerprint) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "decision_method, needs_review, masked_value, evidence, fingerprint, "
+                "tier, priority, semantic_signature, context_class, occurrences, line_start, line_end) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 self._info_buffer,
             )
             self._info_buffer.clear()
@@ -522,8 +590,9 @@ class DetailStore:
             self._exec_many(
                 "INSERT INTO cell_detail (analysis_id, table_id, row, column_index, column, type_key, "
                 "display_name, raw_confidence, masked_value, evidence, confirmed, masked, "
-                "sensitivity, priority, name_hint, cells_checked, fingerprint) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "sensitivity, priority, name_hint, cells_checked, fingerprint, "
+                "tier, category, match_start, match_end, occurrence_index) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 self._buffer,
             )
             self._buffer.clear()
@@ -541,6 +610,8 @@ class DetailStore:
             match.display_name, match.confidence, masked, match.evidence, int(match.confirmed),
             int(match.masked), match.sensitivity, match.priority, round(name_hint, 3),
             cells_checked, fingerprint,
+            match.tier or match.priority, match.legal_category,
+            match.match_start, match.match_end, match.occurrence_index or 1,
         ))
         self.raw_cell_count += 1
         if len(self._buffer) >= self._buffer_limit:
@@ -570,13 +641,16 @@ class DetailStore:
         self._exec_many(
             "UPDATE cell_info SET cell_status = ?, privacy_types = ?, confidence = ?, "
             "needs_review = ?, rule_verdict = ?, final_verdict = ?, decision_method = '규칙', "
-            "evidence = ? "
+            "evidence = ?, match_start = ?, match_end = ?, spans = ? "
             "WHERE analysis_id = ? AND table_id = ? AND row = ? AND column_index = ?",
             [(status, types, round(confidence, 3), int(review), rule_verdict, status, evidence,
+              match_start, match_end, spans,
               self.analysis_id, self.table_id, row, index)
-             for status, types, confidence, review, row, index, rule_verdict, evidence in updates],
+             for status, types, confidence, review, row, index, rule_verdict, evidence,
+              match_start, match_end, spans in updates],
         )
         self._pending_commits += 1
+        self.rule_verdict_cells += len(updates)
         self._breakdown = None
 
     def set_cell_ai_verdicts(self, updates: list[tuple]) -> None:
@@ -739,6 +813,20 @@ class DetailStore:
             (self.analysis_id,),
         ).fetchone()[0]
 
+    def iter_row_lines(self) -> Iterable[tuple[int, int, int]]:
+        """Yield (row, line_start, line_end) for every row the scan registered.
+
+        `row_detail` only carries rows that produced evidence, so the physical
+        source position of a row has to come from the status ledger; this is what
+        lets a resumed run prove it continued at the right line.
+        """
+        self.flush()
+        for raw in self._exec(
+            "SELECT row, line_start, line_end FROM row_status WHERE analysis_id = ? ORDER BY row",
+            (self.analysis_id,),
+        ):
+            yield (raw[0], raw[1], raw[2])
+
     def verify_completeness(self) -> dict:
         """Check that every logical cell has exactly one verdict."""
         breakdown = self.status_breakdown()
@@ -759,7 +847,8 @@ class DetailStore:
     def _cell_from_info(self, raw: tuple) -> dict:
         return dict(zip(VERDICT_FIELDS, raw))
 
-    def _derived_cell(self, row: int, index: int, code: int, column: str) -> dict:
+    def _derived_cell(self, row: int, index: int, code: int, column: str,
+                      line_start: int = 0, line_end: int = 0) -> dict:
         """The verdict of a cell that needs no record: the status byte is it."""
         status = code_to_status(code)
         return {
@@ -770,15 +859,20 @@ class DetailStore:
             "decision_method": "KEY" if status == STATUS_KEY else "규칙",
             "needs_review": False,
             "masked_value": "", "evidence": code_to_evidence(code),
+            "tier": 2, "occurrences": 0, "semantic_signature": "", "context_class": "",
+            "line_start": line_start, "line_end": line_end,
         }
 
     def _derived_cells(self, row: int, blob: bytes, column_names: dict[int, str],
-                       status_wanted: str | None):
+                       status_wanted: str | None, line_start: int = 0,
+                       line_end: int = 0):
         codes = bytearray(blob)
         for index, code in enumerate(codes):
             if code_to_status(code) != status_wanted:
                 continue
-            yield self._derived_cell(row, index, code, column_names.get(index, f"COL_{index}"))
+            yield self._derived_cell(row, index, code,
+                                    column_names.get(index, f"COL_{index}"),
+                                    line_start, line_end)
 
     def _column_names(self) -> dict[int, str]:
         return {index: name for index, name in self._exec(
@@ -786,6 +880,31 @@ class DetailStore:
             "WHERE analysis_id = ? AND table_id = ?",
             (self.analysis_id, self.table_id),
         )}
+
+    @staticmethod
+    def _type_display(codes: str) -> str:
+        """Korean names for the comma-separated type codes stored on a Cell."""
+        if not codes:
+            return ""
+        policy = get_policy()
+        names = []
+        for code in codes.split(","):
+            code = code.strip()
+            if not code:
+                continue
+            ptype = policy.get(code)
+            names.append(ptype.display_name_ko if ptype else code)
+        return ", ".join(names)
+
+    @staticmethod
+    def _type_category(codes: str) -> str:
+        """Legal category of the first recognised type code of a Cell."""
+        policy = get_policy()
+        for code in (codes or "").split(","):
+            ptype = policy.get(code.strip())
+            if ptype is not None:
+                return ptype.category
+        return ""
 
     def iter_cell_verdicts(self, status: str | None = None, offset: int = 0,
                            limit: int | None = None) -> Iterable[dict]:
@@ -811,18 +930,20 @@ class DetailStore:
         names = self._column_names()
         if status in DERIVED_STATUSES:
             rows = self._exec(
-                "SELECT row, status FROM row_status WHERE analysis_id = ? ORDER BY row",
+                "SELECT row, status, line_start, line_end FROM row_status "
+                "WHERE analysis_id = ? ORDER BY row",
                 (self.analysis_id,),
             )
             produced = 0
-            for row_number, blob in rows:
+            for row_number, blob, line_start, line_end in rows:
                 codes = bytearray(blob)
                 matches = sum(1 for code in codes if code_to_status(code) == status)
                 if produced + matches <= offset:
                     # Whole row is before the page: count it, do not materialise it.
                     produced += matches
                     continue
-                for cell in self._derived_cells(row_number, blob, names, status):
+                for cell in self._derived_cells(row_number, blob, names, status,
+                                               line_start, line_end):
                     if produced < offset:
                         produced += 1
                         continue
@@ -847,13 +968,15 @@ class DetailStore:
         info_rows = self._exec(
             "SELECT row, column_index, column, cell_status, privacy_types, rule_verdict, "
             "ai_verdict, final_verdict, confidence, decision_method, needs_review, "
-            "masked_value, evidence FROM cell_info WHERE analysis_id = ? AND row >= ? "
-            "ORDER BY row, column_index", (self.analysis_id, start_row)
+            "masked_value, evidence, tier, occurrences, semantic_signature, "
+            "context_class, line_start, line_end FROM cell_info WHERE analysis_id = ? "
+            "AND row >= ? ORDER BY row, column_index", (self.analysis_id, start_row)
         )
         produced = offset - (offset % uniform_width) if uniform_width and offset else 0
         pending = next(info_rows, None)
-        for row_number, blob in self._exec(
-            "SELECT row, status FROM row_status WHERE analysis_id = ? AND row >= ? ORDER BY row",
+        for row_number, blob, line_start, line_end in self._exec(
+            "SELECT row, status, line_start, line_end FROM row_status "
+            "WHERE analysis_id = ? AND row >= ? ORDER BY row",
             (self.analysis_id, start_row),
         ):
             codes = bytearray(blob)
@@ -868,10 +991,12 @@ class DetailStore:
                         # Invariant broken: the byte promises a record that is not
                         # there. Report the cell as 미평가 rather than dropping it.
                         cell = self._derived_cell(row_number, index, CODE_DETAIL,
-                                                 names.get(index, f"COL_{index}"))
+                                                 names.get(index, f"COL_{index}"),
+                                                 line_start, line_end)
                 else:
                     cell = self._derived_cell(row_number, index, code,
-                                            names.get(index, f"COL_{index}"))
+                                            names.get(index, f"COL_{index}"),
+                                            line_start, line_end)
                 if produced < offset:
                     produced += 1
                     continue
@@ -914,8 +1039,11 @@ class DetailStore:
             return
         stride = max(1, total // limit)
         position = 0
+        # Tier-1 (1순위) cells are offered first so the AI budget is not spent
+        # entirely on low-priority columns, then sampled evenly inside each tier.
         for raw in self._exec(
-            f"{INFO_SELECT} AND cell_status IN ({marks}) ORDER BY column_index, row", params
+            f"{INFO_SELECT} AND cell_status IN ({marks}) "
+            "ORDER BY tier, column_index, row", params
         ):
             if position % stride == 0:
                 yield self._cell_from_info(raw)
@@ -929,8 +1057,9 @@ class DetailStore:
         for raw in self._exec(
             "SELECT id, row, column_index, column, type_key, display_name, raw_confidence, "
             "masked_value, evidence, confirmed, masked, sensitivity, priority, name_hint, "
-            "cells_checked, decision, confidence, needs_review, column_support "
-            "FROM cell_detail WHERE analysis_id = ? ORDER BY row, column_index",
+            "cells_checked, decision, confidence, needs_review, column_support, "
+            "tier, category, match_start, match_end, occurrence_index "
+            "FROM cell_detail WHERE analysis_id = ? ORDER BY row, column_index, occurrence_index",
             (self.analysis_id,),
         ):
             yield {
@@ -941,6 +1070,9 @@ class DetailStore:
                 "name_hint": raw[13], "cells_checked": raw[14],
                 "decision": raw[15], "final_confidence": raw[16],
                 "needs_review": bool(raw[17]), "column_support": raw[18],
+                "tier": raw[19] or raw[12], "category": raw[20],
+                "match_start": raw[21], "match_end": raw[22],
+                "occurrence_index": raw[23],
             }
 
     def iter_cells(self, offset: int = 0, limit: int | None = None) -> Iterable[dict]:
@@ -965,22 +1097,35 @@ class DetailStore:
         ).fetchone()[0]
 
     def row_cell_count(self, row: int) -> int:
+        """Number of distinct Cells of a row that carry a Cell-level verdict."""
         return self._exec(
-            "SELECT COUNT(*) FROM cell_detail WHERE analysis_id = ? AND row = ? AND decision <> ''",
-            (self.analysis_id, row),
+            "SELECT COUNT(*) FROM cell_info WHERE analysis_id = ? AND row = ? "
+            "AND cell_status IN (?, ?, ?)",
+            (self.analysis_id, row, STATUS_PII, STATUS_REVIEW, STATUS_UNRATED),
         ).fetchone()[0]
 
     def cells_for_row(self, row: int, offset: int = 0, limit: int | None = None) -> Iterable[dict]:
-        params: list = [self.analysis_id, row]
-        query = ("SELECT row, column_index, column, type_key, display_name, decision, confidence, "
-                 "masked_value, evidence, needs_review, column_support, name_hint, cells_checked, "
-                 "confirmed, masked, sensitivity, priority FROM cell_detail "
-                 "WHERE analysis_id = ? AND row = ? AND decision <> '' ORDER BY column_index")
+        """Stream the merged Cell verdicts of one row (one line per Cell)."""
+        self.flush()
+        params: list = [self.analysis_id, row, STATUS_PII, STATUS_REVIEW, STATUS_UNRATED]
+        query = ("SELECT i.row, i.column_index, i.column, i.privacy_types, i.final_verdict, "
+                 "i.confidence, i.masked_value, i.evidence, i.needs_review, i.tier, "
+                 "i.occurrences, i.line_start, i.line_end, i.decision_method "
+                 "FROM cell_info i WHERE i.analysis_id = ? AND i.row = ? "
+                 "AND i.cell_status IN (?, ?, ?) ORDER BY i.column_index")
         if limit is not None:
             query += " LIMIT ? OFFSET ?"
             params.extend([limit, offset])
         for raw in self._exec(query, params):
-            yield dict(zip(CELL_FIELDS, raw))
+            types = raw[3] or ""
+            yield {
+                "row": raw[0], "column_index": raw[1], "column": raw[2],
+                "type_key": types, "display_name": self._type_display(types),
+                "decision": raw[4], "confidence": raw[5], "masked_value": raw[6],
+                "evidence": raw[7], "needs_review": bool(raw[8]), "tier": raw[9] or 2,
+                "occurrence_index": raw[10], "line_start": raw[11], "line_end": raw[12],
+                "decision_method": raw[13],
+            }
 
     def cells_between_rows(self, first_row: int, last_row: int,
                            limit: int | None = None) -> Iterable[dict]:
@@ -1001,6 +1146,79 @@ class DetailStore:
         for raw in self._exec(query, params):
             yield self._row_dict(raw)
 
+    def iter_hit_cell_records(self) -> Iterable[dict]:
+        """Stream one merged record per Cell that produced at least one rule hit.
+
+        `cell_detail` keeps one raw line per detector so the audit trail is complete;
+        the hit report the user reads is per Cell, so detector records of the same
+        Cell are merged (types joined, highest confidence wins, occurrence counted).
+        `cell_info` is the authoritative merged verdict for real analyses; the GROUP BY
+        fallback covers stores built without it.
+        """
+        self.flush()
+        names = self._column_names()
+        hit_count = self._exec(
+            "SELECT COUNT(*) FROM cell_info WHERE analysis_id = ? AND cell_status IN (?, ?)",
+            (self.analysis_id, STATUS_PII, STATUS_REVIEW),
+        ).fetchone()[0]
+        if hit_count:
+            rows = self._exec(
+                "SELECT i.row, i.column_index, i.column, i.privacy_types, i.final_verdict, "
+                "i.rule_verdict, i.confidence, i.decision_method, i.needs_review, "
+                "i.masked_value, i.evidence, i.tier, i.occurrences, i.line_start, i.line_end, "
+                "i.match_start, i.match_end, i.spans, "
+                "r.status, r.confirmed_pii, r.possible_pii, r.basis, r.risk_level, r.ai_review "
+                "FROM cell_info i JOIN row_detail r "
+                "ON r.analysis_id = i.analysis_id AND r.row = i.row "
+                "WHERE i.analysis_id = ? AND i.cell_status IN (?, ?) "
+                "ORDER BY i.row, i.column_index",
+                (self.analysis_id, STATUS_PII, STATUS_REVIEW),
+            )
+        else:
+            rows = self._exec(
+                "SELECT c.row, c.column_index, c.column, "
+                "GROUP_CONCAT(DISTINCT c.type_key), "
+                "CASE WHEN MAX(CASE WHEN c.decision = ? THEN 1 ELSE 0 END) THEN ? ELSE '검토 필요' END, "
+                "MAX(c.decision), MAX(c.confidence), '규칙', MAX(c.needs_review), "
+                "MIN(c.masked_value), MIN(c.evidence), MAX(c.tier), COUNT(*), 0, 0, "
+                "MIN(c.match_start), MAX(c.match_end), '', "
+                "r.status, r.confirmed_pii, r.possible_pii, r.basis, r.risk_level, r.ai_review "
+                "FROM cell_detail c JOIN row_detail r "
+                "ON r.analysis_id = c.analysis_id AND r.row = c.row "
+                "WHERE c.analysis_id = ? AND c.decision <> '' "
+                "GROUP BY c.row, c.column_index, c.column ORDER BY c.row, c.column_index",
+                (STATUS_PII, STATUS_PII, self.analysis_id),
+            )
+        for raw in rows:
+            codes = (raw[3] or "").replace(", ", ",")
+            yield {
+                "row": raw[0],
+                "column_index": raw[1],
+                "column": names.get(raw[1], raw[2] or f"COL_{raw[1]}"),
+                "type_key": ", ".join(code.strip() for code in codes.split(",") if code.strip()),
+                "display_name": self._type_display(codes),
+                "decision": raw[4] or raw[5] or STATUS_PII,
+                "confidence": raw[6],
+                "masked_value": raw[9],
+                "evidence": raw[10],
+                "needs_review": bool(raw[8]),
+                "tier": raw[11] or 2,
+                "category": self._type_category(codes),
+                "occurrence_index": raw[12],
+                "match_start": raw[15],
+                "match_end": raw[16],
+                "spans": raw[17],
+                "decision_method": raw[7],
+                "line_start": raw[13],
+                "line_end": raw[14],
+                "row_status": raw[18] or "검토 필요",
+                "row_confirmed": json.loads(raw[19] or "[]"),
+                "row_possible": json.loads(raw[20] or "[]"),
+                "row_basis": raw[21],
+                "row_risk": raw[22],
+                "row_ai": json.loads(raw[23] or "{}"),
+            }
+
     def iter_cells_with_row_context(self) -> Iterable[dict]:
         for raw in self._exec(CELL_WITH_ROW, (self.analysis_id,)):
             yield {
@@ -1009,11 +1227,13 @@ class DetailStore:
                 "masked_value": raw[7], "evidence": raw[8], "needs_review": bool(raw[9]),
                 "column_support": raw[10], "name_hint": raw[11], "cells_checked": raw[12],
                 "confirmed": bool(raw[13]), "masked": bool(raw[14]), "sensitivity": raw[15],
-                "priority": raw[16], "row_status": raw[17],
-                "row_confirmed": json.loads(raw[18] or "[]"),
-                "row_possible": json.loads(raw[19] or "[]"),
-                "row_basis": raw[20], "row_risk": raw[21],
-                "row_ai": json.loads(raw[22] or "{}"),
+                "priority": raw[16], "tier": raw[17] or raw[16], "category": raw[18],
+                "match_start": raw[19], "match_end": raw[20], "occurrence": raw[21],
+                "row_status": raw[22],
+                "row_confirmed": json.loads(raw[23] or "[]"),
+                "row_possible": json.loads(raw[24] or "[]"),
+                "row_basis": raw[25], "row_risk": raw[26],
+                "row_ai": json.loads(raw[27] or "{}"),
             }
 
     def iter_row_verdicts(self, offset: int = 0, limit: int | None = None) -> Iterable[dict]:
@@ -1201,7 +1421,10 @@ class DetailStore:
             "analysis_id": self.analysis_id,
             "table_id": self.table_id,
             "detail_rows_stored": self.rows_with_detail,
-            "detail_cells_stored": self.decided_cells,
+            # One merged rule verdict per Cell that any detector touched: the
+            # raw hit rows can be several per Cell, so the stored-detail count is
+            # the number of Cells, not the number of detector records.
+            "detail_cells_stored": self.rule_verdict_cells,
             "raw_cell_hits": self.raw_cell_count,
             "verdict_cells": completeness["verdict_cells"],
             "verdict_status": completeness["status_counts"],

@@ -39,7 +39,10 @@ from app.detectors.address import AddressDetector
 from app.detectors.embedded import (
     EmbeddedBirthDateDetector,
     EmbeddedCardDetector,
+    EmbeddedCoordinateDetector,
+    EmbeddedDeviceIdDetector,
     EmbeddedEmailDetector,
+    EmbeddedMacDetector,
     EmbeddedPassportDetector,
     EmbeddedPhoneDetector,
     EmbeddedResidentIdDetector,
@@ -70,6 +73,22 @@ from app.detectors.phone import PhoneDetector
 from app.detectors.resident_id import ResidentIdDetector
 from app.detectors.social_security import SocialSecurityDetector
 from app.detectors.name import NameDetector
+from app.detectors.context_policy import (
+    AccountGuidDetector,
+    AuthCredentialDetector,
+    CellIdDetector,
+    CustomerLinkageDetector,
+    FaxNumberDetector,
+    FaceBiometricDetector,
+    GaidDetector,
+    MaskedDataDetector,
+    PaymentInfoDetector,
+    PersonalAttributeDetector,
+    RfidDetector,
+    WirelessNetworkDetector,
+)
+from app.config.privacy_policy import get_policy
+from app.detectors.base import ScanContext
 from app.utils.masking import mask_value
 
 NULL_TOKENS = {"", "null", "NULL", "n/a", "N/A", "-"}
@@ -128,9 +147,35 @@ def build_detectors(config: AnalysisConfig | None = None) -> list[Detector]:
         EmbeddedEmailDetector(),
         EmbeddedPassportDetector(),
         EmbeddedBirthDateDetector(),
+        EmbeddedMacDetector(),
+        EmbeddedCoordinateDetector(),
+        EmbeddedDeviceIdDetector(),
         # Person names that appear inside sentences rather than as a bare value.
         FreeTextNameDetector(),
+        # Types that cannot be decided by value form alone: the column meaning and
+        # the value shape have to agree (see resources/rules/privacy_kr_2026.json).
+        AuthCredentialDetector(),
+        CustomerLinkageDetector(),
+        CellIdDetector(),
+        RfidDetector(),
+        WirelessNetworkDetector(),
+        FaxNumberDetector(),
+        FaceBiometricDetector(),
+        AccountGuidDetector(),
+        PersonalAttributeDetector(),
+        GaidDetector(),
+        PaymentInfoDetector(),
+        MaskedDataDetector(),
     ]
+    policy = get_policy()
+    for detector in detectors:
+        definition = policy.get(detector.type_key)
+        if definition is not None:
+            detector.priority = definition.tier
+            detector.sensitivity = definition.sensitivity
+            detector.legal_category = definition.category
+            if definition.column_aliases and not detector.name_hints:
+                detector.name_hints = definition.column_aliases
     return detectors
 
 
@@ -167,6 +212,11 @@ class PrivacyEngine:
         self.header_count = 0
         self.detector_calls = 0
         self.cell_hits = 0
+        # Cells that hold more than one occurrence of a privacy type, and the
+        # extra occurrences found beyond the first one.
+        self.multi_match_cells = 0
+        self.occurrences_found = 0
+        self.cell_occurrences = 0
         self.rows_with_hits = 0
         # Final verdict counters - filled by finalise_verdicts().
         self.pii_cells = 0
@@ -179,9 +229,38 @@ class PrivacyEngine:
         self.row_verdicts: dict[int, RowRecord] = {}
         self.cached_cells = 0
         self._tag_cache: dict[frozenset[str], tuple[Detector, ...]] = {}
+        #: Table / column context passed to detectors that need more than the
+        #: single column name (name vs. product disambiguation).
+        self.scan_context = ScanContext(table_name=self.config.table)
+        self._context_width = 0
+        self._occurrences_this_batch = 0
+        self._column_context_cache: dict[str, tuple[str, str]] = {}
+        self.policy = get_policy()
+        self.key_names: tuple[str, ...] = ()
         # Rows are streamed in order, so the last row that produced a hit is all
         # that is needed to count distinct rows with hits (no unbounded set).
         self._last_hit_row = 0
+
+    def _column_context(self, name: str) -> tuple[str, str]:
+        """Semantic signature and context class of one column.
+
+        The signature is the set of policy types the column name supports; the
+        context class adds whether the record is keyed and which columns carry the
+        KEY. Two cells may share an AI verdict only when both are identical.
+        """
+        cached = self._column_context_cache.get(name)
+        if cached is not None:
+            return cached
+        policy = self.policy
+        types = sorted(code for code in policy.types
+                       if policy.column_affinity(code, name) >= 0.25)
+        signature = ",".join(types)
+        tier = min((policy.tier(code) for code in types), default=2)
+        key_part = ",".join(sorted(self.key_names)) if self.key_names else "-"
+        context = f"tier:{tier};key:{key_part}"
+        result = (signature, context)
+        self._column_context_cache[name] = result
+        return result
 
     def _detectors_for(self, tags: frozenset[str]) -> tuple[Detector, ...]:
         """Detectors that could apply to a value, cached per character profile."""
@@ -199,7 +278,8 @@ class PrivacyEngine:
         self._tag_cache[tags] = result
         return result
 
-    def process_batch(self, stats: list[ColumnStats], rows: list[list[str]]) -> None:
+    def process_batch(self, stats: list[ColumnStats], rows: list[list[str]],
+                     line_spans: list[tuple[int, int]] | None = None) -> None:
         """Scan every cell of every row and record one verdict per cell.
 
         Cells of a user-selected KEY column are excluded from the privacy scan but
@@ -218,7 +298,25 @@ class PrivacyEngine:
         """
         started = time.perf_counter()
         first_row = self.row_offset + self.rows_analysed + 1
-        for offset, row in enumerate(rows, start=first_row):
+        self._occurrences_this_batch = 0
+        self._column_context_cache: dict[str, tuple[str, str]] = {}
+        self.policy = get_policy()
+        self.key_names: tuple[str, ...] = ()
+        self.key_names = tuple(stats[i].name for i in self.key_indexes if i < len(stats))
+        if len(stats) != self._context_width:
+            self._context_width = len(stats)
+            self.scan_context = ScanContext(
+                table_name=self.scan_context.table_name,
+                column_names=tuple(column.name for column in stats),
+                key_columns=tuple(sorted(stats[i].name for i in self.key_indexes if i < len(stats))),
+            )
+        spans = line_spans or [(0, 0)] * len(rows)
+        # Column semantics are needed for the "different context, same value"
+        # rule: two columns that mean the same thing may share an AI verdict,
+        # columns that do not must not.
+        # Column semantics (not cell values) - bounded by the number of columns.
+        for offset, row, (line_start, line_end) in zip(range(first_row, first_row + len(rows)),
+                                                      rows, spans):
             self.rows_inspected += 1
             width = len(row)
             extra = width - self.header_count
@@ -235,6 +333,7 @@ class PrivacyEngine:
             key_values: list[str] = []
             for index, value in enumerate(row):
                 column = stats[index]
+                signature, context_class = self._column_context(column.name)
                 if index in self.key_indexes:
                     # KEY columns identify the record; they are never judged as
                     # personal data, but the record still needs its fingerprint.
@@ -256,18 +355,36 @@ class PrivacyEngine:
                     continue
                 matched_types: list[str] = []
                 fingerprint = ""
+                spans: list[tuple[str, int, int]] = []
                 for detector in self._detectors_for(profile.tags):
                     self.detector_calls += 1
-                    match = detector.match(value, profile, column.name)
-                    match = detector.contextual_match(match, column.name, value)
-                    if match is not None:
+                    matches = detector.find_matches(value, profile, column.name, self.scan_context)
+                    if not matches:
+                        continue
+                    self._occurrences_this_batch += len(matches)
+                    for match in matches:
+                        match = detector.contextual_match(match, column.name, value)
+                        if match is None:
+                            continue
+                        match.tier = detector.priority
+                        match.legal_category = detector.legal_category
+                        span = (match.type_key, match.match_start, match.match_end)
+                        if span in spans:
+                            # The same detector reporting the same span twice
+                            # (for instance through both match() and find_matches)
+                            # must not produce two evidences for one occurrence.
+                            continue
+                        spans.append(span)
                         # For interior matches the fragment is masked, never the
                         # whole (potentially huge) cell.
                         masked = mask_value(match.fragment or value)
                         if not fingerprint:
                             fingerprint = self.store.fingerprint(value)
                         column.add_hit(match, offset, masked)
-                        self.cell_hits += 1
+                        if not matched_types:
+                            # One hit Cell, however many detectors or occurrences
+                            # produced its evidence.
+                            self.cell_hits += 1
                         if offset > self._last_hit_row:
                             self._last_hit_row = offset
                             self.rows_with_hits += 1
@@ -276,6 +393,10 @@ class PrivacyEngine:
                                                detector.column_affinity(column.name), width,
                                                fingerprint=fingerprint)
                 if matched_types:
+                    if len(spans) > 1:
+                        # One Cell holding more than one occurrence of personal data.
+                        self.multi_match_cells += 1
+                        self.occurrences_found += len(spans) - 1
                     # The rule verdict needs the finished column ratio, so the cell
                     # is parked as unsettled until the scan of the column is done.
                     self.store.add_cell_verdict(
@@ -283,6 +404,9 @@ class PrivacyEngine:
                         types=matched_types, rule_verdict="규칙 판정 대기",
                         masked_value=mask_value(value), decision_method="규칙",
                         needs_review=True, fingerprint=fingerprint,
+                        tier=min((self.policy.tier(t) for t in matched_types), default=2),
+                        semantic_signature=signature, context_class=context_class,
+                        occurrences=len(spans), line_start=line_start, line_end=line_end,
                     )
                     continue
                 cleared = rule_negative_verdict(value, column.name)
@@ -299,16 +423,24 @@ class PrivacyEngine:
                                                masked_value=mask_value(value),
                                                decision_method="규칙", needs_review=True,
                                                evidence="규칙: 개인정보 패턴 없음 (AI/사람 판단 대기)",
-                                               fingerprint=self.store.fingerprint(value))
+                                               fingerprint=self.store.fingerprint(value),
+                                               semantic_signature=signature,
+                                               context_class=context_class,
+                                               line_start=line_start, line_end=line_end)
             # Rows keep their own identity: the KEY fingerprint is stored next to
             # the row, never as part of the row key, so two rows with the same KEY
             # value (or with no KEY at all) remain two separate records.
             record_fingerprint = self.store.fingerprint("|".join(key_values)) if key_values else ""
-            self.store.close_row(record_fingerprint, f"r:{offset}")
+            # The KEY values are kept only in masked form so the AI can see what
+            # identifies the record without the report ever holding raw KEY data.
+            key_mask = " | ".join(mask_value(value) for value in key_values[:6])
+            self.store.close_row(record_fingerprint, f"r:{offset}", line_start, line_end,
+                                 key_mask=key_mask)
         # One transaction per batch: far fewer fsync-bound commits than flushing
         # every buffer, while still surviving a crash mid-file.
         self.store.commit()
         self.rows_analysed += len(rows)
+        self.cell_occurrences += self._occurrences_this_batch
         self.elapsed_rules += time.perf_counter() - started
 
     def finalise_verdicts(self, stats: list[ColumnStats]) -> list[RowRecord]:
@@ -338,11 +470,16 @@ class PrivacyEngine:
             if not merged:
                 return
             updates = []
-            for (row, index), (status, confirmed, candidates, conf, review, verdict, evidence) in merged.items():
-                # A confirmed Cell reports only confirmed types; an unconfirmed one
-                # reports the candidate types that put it in "검토 필요".
-                updates.append((status, ",".join(confirmed or candidates), round(conf, 3),
-                                bool(review), row, index, verdict, evidence))
+            for (row, index), (status, confirmed, candidates, conf, review, verdict,
+                               evidence, start, end, span_text) in merged.items():
+                updates.append((status,
+                                ",".join(list(dict.fromkeys((confirmed or []) + (candidates or [])))),
+                                round(conf, 3),
+                                bool(review), row, index, verdict, evidence, start, end, span_text))
+                if status == STATUS_PII:
+                    self.pii_cells += 1
+                elif status == STATUS_REVIEW:
+                    self.review_cells += 1
             self.store.merge_cell_rule_verdicts(updates)
             merged.clear()
 
@@ -361,6 +498,9 @@ class PrivacyEngine:
                 cells = []
             key = (raw["row"], raw["column_index"])
             entry = merged.get(key)
+            span_start = raw["match_start"] if raw["match_start"] >= 0 else 0
+            span_end = raw["match_end"] if raw["match_end"] > span_start else span_start + 1
+            span_text = f"{raw['type_key']}@{span_start}-{span_end}"
             if decision == IGNORE_VERDICT:
                 # A shape that only looks like personal data: the cell is cleared,
                 # not left unjudged.
@@ -368,17 +508,15 @@ class PrivacyEngine:
                 if entry is None:
                     merged[key] = [STATUS_NON, [], [], confidence, False,
                                    IGNORE_VERDICT,
-                                   f"규칙: {raw['display_name']} 형식만 일치, 근거 부족"]
+                                   f"규칙: {raw['display_name']} 형식만 일치, 근거 부족",
+                                   span_start, span_end, ""]
                 continue
-            if decision == STATUS_PII:
-                self.pii_cells += 1
-            else:
-                self.review_cells += 1
             if entry is None:
                 merged[key] = [decision,
-                               [raw["display_name"]] if decision == STATUS_PII else [],
-                               [raw["display_name"]],
-                               confidence, needs_review, raw["display_name"], raw["evidence"]]
+                               [raw["type_key"]] if decision == STATUS_PII else [],
+                               [raw["type_key"]],
+                               confidence, needs_review, raw["display_name"], raw["evidence"],
+                               span_start, span_end, span_text]
             else:
                 # Strongest verdict wins; a weaker match never downgrades a cell.
                 if STATUS_RANK[decision] > STATUS_RANK[entry[0]]:
@@ -387,13 +525,17 @@ class PrivacyEngine:
                     entry[6] = raw["evidence"]
                 entry[3] = max(entry[3], confidence)
                 entry[4] = entry[4] or needs_review
+                entry[7] = min(entry[7], span_start)
+                entry[8] = max(entry[8], span_end)
+                if span_text not in entry[9].split(";"):
+                    entry[9] = f"{entry[9]};{span_text}" if entry[9] else span_text
                 if decision == STATUS_PII:
                     # Only a confirmed match may name a type on the Cell record; a
                     # downgraded match stays a candidate, listed in the hit ledger.
-                    if raw["display_name"] and raw["display_name"] not in entry[1]:
-                        entry[1].append(raw["display_name"])
-                elif raw["display_name"] and raw["display_name"] not in entry[2]:
-                    entry[2].append(raw["display_name"])
+                    if raw["type_key"] and raw["type_key"] not in entry[1]:
+                        entry[1].append(raw["type_key"])
+                elif raw["type_key"] and raw["type_key"] not in entry[2]:
+                    entry[2].append(raw["type_key"])
             pending.append((decision, round(confidence, 3), int(needs_review),
                             round(ratio, 4), raw["id"]))
             if len(pending) >= 1000:
@@ -479,6 +621,8 @@ class PrivacyEngine:
             "detector_calls": self.detector_calls,
             "rows_with_hits": self.rows_with_hits,
             "cell_hits": self.cell_hits,
+            "multi_occurrence_cells": self.multi_match_cells,
+            "extra_occurrences": self.occurrences_found,
             "pii_cells": self.pii_cells,
             "review_cells": self.review_cells,
             "ignored_cells": self.ignored_cells,

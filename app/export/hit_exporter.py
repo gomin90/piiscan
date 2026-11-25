@@ -20,6 +20,7 @@ import csv
 from pathlib import Path
 from typing import Iterable
 
+from app.config.privacy_policy import get_policy
 from app.utils.csv_safety import formula_safe
 
 # (record key, CSV column). `_write` emits exactly these columns in this order,
@@ -28,7 +29,9 @@ CELL_FIELDS = [
     ("analysed_at", "분석일시"), ("file", "파일명"), ("db_type", "원본DB"),
     ("schema", "스키마"), ("table", "테이블명"), ("row_number", "행번호"),
     ("column", "컬럼명"), ("column_index", "컬럼 인덱스"),
-    ("privacy_type", "개인정보유형"), ("verdict", "판정"),
+    ("privacy_type", "개인정보유형"), ("tier", "우선순위(Tier)"),
+    ("category", "분류"), ("occurrence", "Occurrence"),
+    ("match_position", "Match 위치"), ("verdict", "판정"),
     ("masked_value", "탐지값(마스킹)"), ("evidence", "판단근거"),
     ("confidence", "Cell 신뢰도"), ("needs_review", "검토 필요"),
     ("row_verdict", "Row 판정"), ("row_types", "Row 확정 유형"),
@@ -45,6 +48,7 @@ ROW_FIELDS = [
     ("cell_count", "탐지 Cell 수"), ("basis", "판정 근거"),
     ("confidence", "Row 신뢰도"), ("risk_level", "Row 위험도"),
     ("needs_review", "검토 필요"), ("ai_row", "AI Row 판정"),
+    ("line_start", "원본 시작 라인"), ("line_end", "원본 끝 라인"),
 ]
 
 # Every analysed cell, settled or not: the complete Cell-level ledger.
@@ -57,6 +61,9 @@ VERDICT_FIELDS = [
     ("final_verdict", "최종 판정"), ("confidence", "Cell 신뢰도"),
     ("decision_method", "판단 방법"), ("needs_review", "검토 필요"),
     ("masked_value", "마스킹 값"), ("evidence", "판단 근거"),
+    ("tier", "우선순위(Tier)"),
+    ("occurrences", "Occurrence 수"),
+    ("line_start", "원본 시작 라인"), ("line_end", "원본 끝 라인"),
 ]
 
 CELL_HEADERS = [header for _, header in CELL_FIELDS]
@@ -115,6 +122,20 @@ def _types_text(value) -> str:
     return ", ".join(formula_safe(part) for part in dict.fromkeys(parts))
 
 
+def _category_of(type_text: str) -> str:
+    """Legal category of the first recognised type named in a merged Cell."""
+    policy = get_policy()
+    for part in (type_text or "").split(","):
+        code = part.strip()
+        if not code:
+            continue
+        ptype = policy.get(code) or next(
+            (item for item in policy.types.values() if item.display_name_ko == code), None)
+        if ptype is not None:
+            return ptype.category
+    return ""
+
+
 def iter_row_records(file_results: Iterable) -> Iterable[dict]:
     """Stream every row verdict from the detail store (no memory cap)."""
     for result in file_results:
@@ -150,7 +171,8 @@ def iter_hit_cells(file_results: Iterable) -> Iterable[dict]:
     for result in file_results:
         analysed_at, file_name, db_type, schema, table = _file_meta(result)
         store = getattr(result, "detail_store", None)
-        cells = store.iter_cells_with_row_context() if store is not None else _fallback_cells(result)
+        cells = (store.iter_hit_cell_records() if store is not None
+                 else _fallback_cells(result))
         for cell in cells:
             yield {
                 "analysed_at": analysed_at,
@@ -162,6 +184,13 @@ def iter_hit_cells(file_results: Iterable) -> Iterable[dict]:
                 "column": formula_safe(cell["column"]),
                 "column_index": cell["column_index"],
                 "privacy_type": formula_safe(cell["type_key"]),
+                "tier": cell.get("tier") or cell.get("priority") or 2,
+                "category": formula_safe(_category_of(cell["type_key"])),
+                "occurrence": cell.get("occurrence_index") or 1,
+                "match_position": formula_safe(
+                    cell.get("spans")
+                    or ("" if cell.get("match_start", -1) < 0
+                        else f"{cell['match_start']}-{cell['match_end']}")),
                 "verdict": formula_safe(cell.get("decision") or "개인정보"),
                 "masked_value": formula_safe(cell["masked_value"]),
                 "evidence": formula_safe(cell["evidence"]),
@@ -204,6 +233,8 @@ def iter_row_export_records(file_results: Iterable) -> Iterable[dict]:
                 "risk_level": formula_safe(record.get("risk_level", "")),
                 "needs_review": "예" if record.get("needs_review") else "아니요",
                 "ai_row": formula_safe(record.get("ai_review", {}).get("personality", "")),
+                "line_start": record.get("line_start") or record["row"],
+                "line_end": record.get("line_end") or record["row"],
             }
 
 
@@ -234,6 +265,8 @@ def iter_record_records(file_results: Iterable) -> Iterable[dict]:
                 "unrated_cells": record["unrated_cells"],
                 "row_verdict": formula_safe(record["status"]),
                 "has_pii": "예" if record["has_pii"] else "아니요",
+                "line_start": record.get("line_start") or record["row"],
+                "line_end": record.get("line_end") or record["row"],
             }
 
 

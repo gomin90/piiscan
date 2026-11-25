@@ -15,7 +15,7 @@ class ForeignerIdDetector(Detector):
     display_name = "외국인등록번호"
     priority = 1
     sensitivity = 0.9
-    candidate_tags = frozenset({"digits", "digits_sep", "latin", "masked"})
+    candidate_tags = frozenset({"digits", "digits_sep", "latin", "masked", "alnum"})
     name_hints = ("외국인", "FOREIGN", "ALIEN", "foreigner", "IATI", "FID")
 
     def match(self, value: str, profile: ValueProfile, column_name: str = "") -> Match | None:
@@ -32,8 +32,12 @@ class ForeignerIdDetector(Detector):
                         evidence="12자 외국인등록번호 형식" if hinted
                         else "12자 숫자 - 외국인등록번호 후보 (원천 확인 필요)",
                         priority=self.priority, sensitivity=self.sensitivity)
-        if len(v) == 10 and v[:2].isdigit() and v[2].isalpha() and v[3:].isdigit():
-            return Match(self.type_key, self.display_name, 0.65,
-                        evidence="외국인등록번호 대체 형식 (숫자2+알파1+숫자7)",
-                        priority=self.priority, sensitivity=self.sensitivity)
+        if FULL_RE.match(v) and len(v) == 10:
+            # Documented alternative format: 2 digits + 1 letter + 7 digits.
+            hinted = self.column_affinity(column_name) >= 0.40
+            return Match(self.type_key, self.display_name, 0.8 if hinted else 0.6,
+                         evidence="외국인등록번호 대체 형식 (숫자2+알파1+숫자7)"
+                                  if hinted else "외국인등록번호 Similar 형식 (원천 확인 필요)",
+                         priority=self.priority, sensitivity=self.sensitivity,
+                         confirmed=hinted)
         return None

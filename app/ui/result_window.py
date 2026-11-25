@@ -44,8 +44,9 @@ COLUMNS = [
 ROW_HEADERS = ["행번호", "개인정보 상태", "확정 개인정보", "검토 필요", "Cell(PII)",
               "Cell(검토)", "Cell(미평가)", "Cell(비PII)", "Cell(빈)", "KEY 제외", "Row 위험도",
               "AI Row 판정"]
-CELL_HEADERS = ["행번호", "컬럼", "컬럼 인덱스", "Cell 판정", "개인정보 유형", "규칙 판정",
-                "AI 판정", "최종 판정", "신뢰도", "판단 방법", "검토", "마스킹 값"]
+CELL_HEADERS = ["행번호", "컬럼", "컬럼 인덱스", "순위", "Cell 판정", "개인정보 유형",
+                "Occurrence", "규칙 판정", "AI 판정", "최종 판정", "신뢰도", "판단 방법",
+                "검토", "마스킹 값", "소스 라인"]
 
 RISK_ORDER = {"매우 높음": 0, "높음": 1, "보통": 2, "낮음": 3, "확인 필요": 4}
 
@@ -402,12 +403,16 @@ class ResultWindow(QWidget):
             for cell in store.iter_cell_verdicts(filter_status, offset=remaining, limit=take):
                 records.append({
                     "행번호": cell["row"], "컬럼": cell["column"], "컬럼 인덱스": cell["column_index"],
-                    "Cell 판정": cell["cell_status"], "개인정보 유형": cell["privacy_types"],
+                    "순위": cell.get("tier", 2),
+                    "Cell 판정": cell["cell_status"],
+                    "개인정보 유형": store._type_display(cell["privacy_types"]),
+                    "Occurrence": cell.get("occurrences", 0),
                     "규칙 판정": cell["rule_verdict"], "AI 판정": cell["ai_verdict"] or "-",
                     "최종 판정": cell["final_verdict"] or cell["cell_status"],
                     "신뢰도": round(cell["confidence"], 3), "판단 방법": cell["decision_method"],
                     "검토": "예" if cell["needs_review"] else "아니요",
                     "마스킹 값": cell["masked_value"],
+                    "소스 라인": cell.get("line_start", 0),
                 })
             remaining = 0
         self.cell_model.set_records(records)

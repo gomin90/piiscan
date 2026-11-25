@@ -19,8 +19,9 @@ wide file look clean when it was simply never judged.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
-from app.utils.masking import mask_value
+from app.utils.masking import mask_value, looks_masked
 
 STATUS_PII = "개인정보"
 STATUS_REVIEW = "검토 필요"
@@ -56,6 +57,20 @@ CODE_NAME_TOKENS = ("no", "id", "cd", "code", "seq", "num", "key", "ref", "flag"
                     "status", "type", "category", "qty", "count", "amount", "price",
                     "version", "url", "hash", "checksum", "color", "state")
 
+#: Types whose evidence is *column meaning + value shape* rather than a format.
+#: For those columns the generic "looks like a hash / an integer / Base64"
+#: short-cut must never declare the cell non-personal.
+CONTEXT_ONLY_SUPPORT = ("context",)
+
+
+@lru_cache(maxsize=4096)
+def protected_column(column_name: str) -> tuple[str, ...]:
+    """Policy types that name this column and cannot be excluded by shape alone."""
+    from app.config.privacy_policy import get_policy
+
+    return tuple(found.code for found in get_policy().high_priority_columns(column_name)
+                 if found.support in CONTEXT_ONLY_SUPPORT)
+
 
 def rule_negative_verdict(value: str, column_name: str) -> tuple[str, str] | None:
     """Return (label, evidence) when the rules can affirm the cell is not personal.
@@ -63,9 +78,21 @@ def rule_negative_verdict(value: str, column_name: str) -> tuple[str, str] | Non
     Only unambiguous shapes are cleared. Free text, names, addresses and mixed
     natural language are never cleared by the rule engine - they stay ``미평가``
     so the model, or a human, can still judge them.
+
+    Columns that the privacy policy names as high-priority (PASSWORD/PIN, CI,
+    CELL_ID, RFID, FACE/BIOMETRIC, SSID, ACCOUNT GUID, customer attributes) are
+    exempt from the shape short-cut: a credential that looks like a hash is *not*
+    proof of the absence of personal data, so the cell stays unassessed.
     """
     text = (value or "").strip()
     if not text:
+        return None
+    #: A value that is already masked is a fragment of something bigger: the rules
+    #: can never prove the *rest* of it is not personal data, so a masked cell is
+    #: never cleared as non-personal.
+    if looks_masked(text):
+        return None
+    if protected_column(column_name):
         return None
     for label, pattern in NON_PERSONAL_PATTERNS:
         if pattern.match(text):

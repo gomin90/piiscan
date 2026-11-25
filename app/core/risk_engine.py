@@ -1,6 +1,7 @@
 """위험도 및 우선순위 평가."""
 from __future__ import annotations
 
+from app.config.privacy_policy import get_policy
 from app.utils.masking import looks_masked
 
 RISK_LEVELS = ["매우 높음", "높음", "보통", "낮음", "확인 필요"]
@@ -70,8 +71,27 @@ def assess_column(finding: dict, protection: dict | None, ai: dict | None, table
         level = "확인 필요"
     else:
         level = level_from_score(max(0.0, min(score, 1.0)))
+
+    # Spec section 7: a custom identifier that is confirmed to be personal data
+    # moves the *risk level* up one step. The numeric score and the rule
+    # confidence are deliberately left alone - a step up is a judgement about
+    # consequence, not about how certain the match is. Tier is a separate axis
+    # (legal priority) and is reported alongside, never merged into the level.
+    policy = get_policy()
+    step_up = [t["type_key"] for t in types if policy.risk_step_up(t["type_key"])]
+    if step_up:
+        index = RISK_LEVELS.index(level)
+        if index > 0:
+            level = RISK_LEVELS[index - 1]
+            drivers.append(
+                "Custom Identifier 개인정보 확인 -> 위험 단계 1 상향"
+                f" (근거: {'/'.join(step_up)})"
+            )
+
+    tiers = {policy.tier(t["type_key"]) for t in types}
     return {
         "score": round(max(0.0, min(score, 1.0)), 3),
         "level": level,
+        "tier": min(tiers) if tiers else 2,
         "drivers": drivers,
     }

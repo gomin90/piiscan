@@ -45,7 +45,12 @@ def type_key_map() -> dict[str, str]:
     # The location detector reports per-axis sub-types that are not separate
     # detector objects, so their display names need explicit aliases.
     mapping.update({"위도": "LATITUDE", "경도": "LONGITUDE",
-                   "위치좌표(위도 범위)": "LOCATION", "위치좌표(경도 범위)": "LOCATION"})
+                   "위치좌표(위도 범위)": "LOCATION", "위치좌표(경도 범위)": "LOCATION",
+                   "위치좌표(위도·경도)": "LOCATION"})
+    # Custom-rule hits carry rule display names that are not detector keys.
+    mapping.update({".sec ID": "CUSTOM_SEC_ID", ".id ID": "CUSTOM_ID_SUFFIX",
+                    "구분자 포함 ID": "CUSTOM_IDENTIFIER", "복합 사용자 ID": "CUSTOM_IDENTIFIER",
+                    "회원/고객 ID": "CUSTOM_IDENTIFIER", "사용자 정의 ID": "CUSTOM_IDENTIFIER"})
     return mapping
 
 
@@ -66,7 +71,7 @@ def run_gold(csv_path: Path, use_ai: bool, key_columns: list[str]) -> dict:
     store = result.detail_store
 
     labels = gold_labels()
-    stats: dict[str, dict[str, int]] = defaultdict(lambda: {"tp": 0, "fp": 0, "fn": 0, "tn": 0})
+    stats: dict[str, dict[str, int]] = defaultdict(lambda: {"tp": 0, "fp": 0, "fn": 0, "tn": 0, "confusion": 0})
     unresolved: dict[str, int] = defaultdict(int)
     misses: list[dict] = []
     status_totals: dict[str, int] = defaultdict(int)
@@ -78,12 +83,27 @@ def run_gold(csv_path: Path, use_ai: bool, key_columns: list[str]) -> dict:
         key = (cell["row"], cell["column"])
         gold_status, gold_types = labels.get(key, ("NOT_PERSONAL", ()))
         predicted_types = {names.get(t, t) for t in (cell["privacy_types"] or "").split(",") if t}
+        if gold_status == "MASKED_PERSONAL":
+            # Spec §2/§12: a mask/hash/encoded value in a protected column may be
+            # flagged or left for review, but must never be cleared as non-personal.
+            if status in (STATUS_PII, STATUS_REVIEW):
+                for kind in gold_types:
+                    stats[kind]["tp"] += 1
+            else:
+                for kind in gold_types:
+                    stats[kind]["fn"] += 1
+                misses.append({"kind": "false_negative", "row": cell["row"], "column": cell["column"],
+                               "value": cell["masked_value"], "status": status,
+                               "gold_types": list(gold_types)})
+            continue
         if status == STATUS_PII:
             if gold_status == "PERSONAL":
                 for kind in predicted_types & set(gold_types):
                     stats[kind]["tp"] += 1
                 for kind in predicted_types - set(gold_types):
-                    stats[kind]["fp"] += 1
+                    # The cell IS personal, the model named a different type: that is
+                    # type confusion, not a spurious personal-data hit.
+                    stats[kind]["confusion"] += 1
                 if not predicted_types:
                     stats["(유형 없음)"]["fp"] += 1
             else:
@@ -103,6 +123,10 @@ def run_gold(csv_path: Path, use_ai: bool, key_columns: list[str]) -> dict:
             misses.append({"kind": "false_positive", "row": cell["row"], "column": cell["column"],
                            "value": cell["masked_value"], "predicted": sorted(predicted_types),
                            "gold": gold_status})
+        elif status == STATUS_PII and predicted_types - set(gold_types):
+            misses.append({"kind": "confusion", "row": cell["row"], "column": cell["column"],
+                           "value": cell["masked_value"], "predicted": sorted(predicted_types),
+                           "gold_types": list(gold_types)})
         elif gold_status == "PERSONAL" and status != STATUS_PII:
             misses.append({"kind": "unresolved" if status == STATUS_REVIEW else "false_negative",
                            "row": cell["row"], "column": cell["column"],
@@ -112,6 +136,7 @@ def run_gold(csv_path: Path, use_ai: bool, key_columns: list[str]) -> dict:
     types = []
     for kind in sorted(set(stats) | set(unresolved)):
         tp, fp, fn = stats[kind]["tp"], stats[kind]["fp"], stats[kind]["fn"]
+        confusion = stats[kind]["confusion"]
         precision = tp / (tp + fp) if tp + fp else 0.0
         recall = tp / (tp + fn) if tp + fn else 0.0
         f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
@@ -122,6 +147,7 @@ def run_gold(csv_path: Path, use_ai: bool, key_columns: list[str]) -> dict:
             "f1": round(f1, 4),
             "false_positive": fp,
             "false_negative": fn,
+            "type_confusion": confusion,
             "unresolved_review": unresolved.get(kind, 0),
             "support": tp + fn,
         })
@@ -132,7 +158,9 @@ def run_gold(csv_path: Path, use_ai: bool, key_columns: list[str]) -> dict:
         "status_totals": dict(status_totals),
         "completeness": store.verify_completeness(),
         "types": types,
-        "false_positive_cells": misses[:60] if (misses := misses) else [],
+        "false_positive_cells": [m for m in misses if m["kind"] == "false_positive"],
+        "false_negative_cells": [m for m in misses if m["kind"] == "false_negative"],
+        "type_confusion_cells": [m for m in misses if m["kind"] == "confusion"],
         "ai_audit": getattr(result, "ai_audit", None) or {},
     }
 
@@ -158,12 +186,12 @@ def main() -> int:
     for payload in payloads:
         print(f"\n=== {payload['mode']} ({payload['elapsed_seconds']}s, "
               f"{payload['cells']:,} cells, complete={payload['completeness']['complete']})")
-        header = f"{'유형':<18}{'P':>8}{'R':>8}{'F1':>8}{'FP':>6}{'FN':>6}{'미 resolution':>14}"
+        header = f"{'유형':<20}{'P':>7}{'R':>7}{'F1':>7}{'FP':>5}{'FN':>5}{' confusion':>10}{'review':>8}{'cells':>7}"
         print(header)
         for row in payload["types"]:
-            print(f"{row['type']:<18}{row['precision']:>8.2f}{row['recall']:>8.2f}"
-                  f"{row['f1']:>8.2f}{row['false_positive']:>6}{row['false_negative']:>6}"
-                  f"{row['unresolved_review']:>14}")
+            print(f"{row['type']:<20}{row['precision']:>7.2f}{row['recall']:>7.2f}"
+                  f"{row['f1']:>7.2f}{row['false_positive']:>5}{row['false_negative']:>5}"
+                  f"{row['type_confusion']:>10}{row['unresolved_review']:>8}{row['support']:>7}")
     print(f"\nWrote {out}")
     return 0
 
