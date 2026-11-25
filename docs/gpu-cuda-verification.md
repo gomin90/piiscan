@@ -31,6 +31,10 @@ ggml backend registry에 CUDA device가등록 않고 `llama_supports_gpu_offload
 - Blackwell compute capability = **sm_120**.
 - bundled 12.4 asset의 arch scan: sm_50 ×144, sm_61 ×204, sm_70 ×122, sm_75 ×84, sm_80 ×113,
   sm_90 ×269. **sm_120 없음**.
+- detector-side detail: `app/ai/gpu_detector.py` keeps the kernel list as bare numbers
+  (`120`) and normalises the device arch (`sm_120`) before comparing, so a backend that
+  does carry `sm_120` kernels is reported as a match. Scanning both vendored assets found
+  **no `compute_XX` PTX strings**, so the detector never claims PTX JIT for them.
 - llama.cpp `ggml/src/ggml-cuda/CMakeLists.txt`의 comment: `120 == Blackwell (RTX 50xx), needs CUDA
   v12.8` → CUDA 12.8+ build 없으면 Blackwell kernels 생성되지 않음.
 - 따라서 `ggml-cuda.dll`(12.4)를 placement해도 driver만 있는 PC에서 cublas 12 DLL resolve 실패로

@@ -218,8 +218,23 @@ def _cuda_dll_search_dirs(binary_dir: Path | None) -> list[Path]:
     return [d for d in dirs if d and d.is_dir()]
 
 
+def _arch_number(value: str) -> str:
+    """Normalise an architecture label to its bare digits.
+
+    'sm_120', '120' and '12.0' all mean compute capability 12.0. Backend kernels are
+    read out of the DLL as 'sm_120' and the device is reported as 'sm_120', so every
+    comparison in this module must go through this normalisation - comparing
+    'sm_120' against the stored bare '120' silently reports a kernel mismatch for a
+    GPU the backend actually supports.
+    """
+    return re.sub(r"[^0-9]", "", value or "")
+
+
 def _compiled_cuda_archs(path: Path) -> tuple[list[str], list[str]]:
-    """Device code (sm_XX) and PTX (compute_XX) targets embedded in a ggml-cuda backend."""
+    """Device code (sm_XX) and PTX (compute_XX) numbers embedded in a ggml-cuda backend.
+
+    Both lists are bare numbers ("120", not "sm_120"), sorted numerically.
+    """
     device_archs: set[str] = set()
     ptx_archs: set[str] = set()
     try:
@@ -234,7 +249,7 @@ def _compiled_cuda_archs(path: Path) -> tuple[list[str], list[str]]:
                 ptx_archs.update(match.group(1).decode() for match in re.finditer(rb"compute_(\d{2,3})", chunk))
     except OSError:
         return [], []
-    return sorted(device_archs), sorted(ptx_archs)
+    return sorted(device_archs, key=int), sorted(ptx_archs, key=int)
 
 
 def _device_arch_from_smi() -> str:
@@ -330,24 +345,36 @@ def analyze_cuda_backend(library: Path, binary_dir: Path | None = None,
     )
     status["driver_cuda"] = _cuda_driver_version()
 
+    device_number = _arch_number(status["device_arch"])
+
     if status["missing"]:
         majors = sorted({name.split("_")[1].split(".")[0] for name in status["missing"]})
         status["reason"] = (
             "ggml-cuda.dll needs " + ", ".join(status["missing"]) + " (CUDA " + "/".join(majors) + " runtime), "
             "which is not installed here -> llama.cpp cannot load the CUDA backend and runs on CPU"
         )
-    elif status["device_arch"] and status["archs"] and status["device_arch"] not in status["archs"]:
-        jit = ("; PTX JIT is only possible for compute_" + status["ptx_archs"][-1]) if status["ptx_archs"] else ""
-        status["reason"] = (
-            f"GPU is {status['device_arch']} but the backend has native kernels only for "
-            + ", ".join("sm_" + a for a in status["archs"]) + "; no kernels for this GPU" + jit
-        )
-    elif not status["device_arch"]:
+    elif not device_number or not status["archs"]:
         status["usable"] = True
         status["reason"] = "library and CUDA runtime DLLs resolve; GPU compute capability not queryable"
-    else:
+    elif device_number in status["archs"]:
         status["usable"] = True
         status["reason"] = f"library, CUDA runtime and native kernels for {status['device_arch']} all match"
+    else:
+        # PTX is forward compatible: a driver can JIT compute_90 PTX on an sm_120 GPU,
+        # so a backend without a native kernel for this GPU can still run.
+        jit_targets = [a for a in status["ptx_archs"] if int(a) <= int(device_number)]
+        native = ", ".join("sm_" + a for a in status["archs"])
+        if jit_targets:
+            status["usable"] = True
+            status["reason"] = (
+                f"no native kernels for {status['device_arch']} (native kernels for {native}); "
+                f"the driver JIT-compiles compute_{jit_targets[-1]} PTX instead"
+            )
+        else:
+            status["reason"] = (
+                f"GPU is {status['device_arch']} but the backend has native kernels only for "
+                + native + "; no kernels or JIT-able PTX for this GPU"
+            )
     return status
 
 

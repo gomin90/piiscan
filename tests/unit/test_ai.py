@@ -144,6 +144,44 @@ def test_cuda_status_reports_arch_mismatch_for_blackwell(tmp_path: Path):
     assert "sm_90" in status["reason"]
 
 
+def test_cuda_backend_matching_the_gpu_arch_is_usable(tmp_path: Path):
+    """'sm_120' must match the stored kernel number '120', not compare as a string."""
+    from app.ai.gpu_detector import analyze_cuda_backend
+
+    backend = tmp_path / "ggml-cuda.dll"
+    backend.write_bytes(b"cublas64_13.dll cublasLt64_13.dll sm_90 sm_120 sm_121 compute_90")
+    (tmp_path / "cublas64_13.dll").write_bytes(b"x")
+    (tmp_path / "cublasLt64_13.dll").write_bytes(b"x")
+
+    for device_arch in ("sm_120", "120", "12.0"):
+        status = analyze_cuda_backend(backend, tmp_path, device_arch=device_arch)
+        assert status["usable"] is True, (device_arch, status["reason"])
+        assert "match" in status["reason"], (device_arch, status["reason"])
+    # archs are stored as bare numbers, sorted numerically (not "103" before "90").
+    assert status["archs"] == ["90", "120", "121"]
+    assert status["ptx_archs"] == ["90"]
+
+
+def test_cuda_backend_can_run_through_ptx_jit(tmp_path: Path):
+    """A backend without a native kernel for the GPU still runs if it carries lower PTX."""
+    from app.ai.gpu_detector import analyze_cuda_backend
+
+    backend = tmp_path / "ggml-cuda.dll"
+    backend.write_bytes(b"cublas64_13.dll cublasLt64_13.dll sm_86 sm_103 compute_90 compute_103")
+    (tmp_path / "cublas64_13.dll").write_bytes(b"x")
+    (tmp_path / "cublasLt64_13.dll").write_bytes(b"x")
+
+    status = analyze_cuda_backend(backend, tmp_path, device_arch="sm_120")
+    assert status["usable"] is True
+    assert "compute_103" in status["reason"]
+
+    # Nothing JIT-able: the only PTX targets are above this GPU's capability.
+    backend.write_bytes(b"cublas64_13.dll cublasLt64_13.dll sm_121 compute_121")
+    status = analyze_cuda_backend(backend, tmp_path, device_arch="sm_86")
+    assert status["usable"] is False
+    assert "JIT-able PTX" in status["reason"]
+
+
 def test_cuda_runtime_dlls_are_found_in_the_13_x_bin_x64_layout(tmp_path: Path, monkeypatch):
     """CUDA 13.x installs its runtime DLLs in bin\\x64, not bin."""
     from app.ai.gpu_detector import _cuda_dll_search_dirs, cuda_backend_status
