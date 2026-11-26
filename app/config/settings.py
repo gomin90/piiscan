@@ -13,6 +13,10 @@ from typing import Any
 
 DEFAULT_BATCH_SIZE = 1000
 DEFAULT_CONTEXT_LENGTH = 2048
+# Analysis range caps. They are *limits*, not a size to allocate: a file smaller
+# than the cap is analysed to its real end, and nothing is pre-allocated for the cap.
+DEFAULT_MAX_ROWS = 999_999
+DEFAULT_MAX_COLS = 999_999
 DEFAULT_MAX_DISTINCT_TRACKED = 2000
 DEFAULT_MAX_SAMPLES = 6
 DEFAULT_THREADS = 2
@@ -24,6 +28,11 @@ SUPPORTED_ENCODINGS = ["utf-8", "utf-8-sig", "cp949", "euc-kr", "utf-16", "utf-1
 class AnalysisConfig:
     batch_size: int = DEFAULT_BATCH_SIZE
     context_length: int = DEFAULT_CONTEXT_LENGTH
+    # Upper bound on the rows/columns that enter the analysis. The real file is
+    # measured first; when it is smaller the real size wins. 0 (or a negative
+    # value) means "no cap". These numbers never allocate memory.
+    max_rows: int = DEFAULT_MAX_ROWS
+    max_cols: int = DEFAULT_MAX_COLS
     max_distinct_tracked: int = DEFAULT_MAX_DISTINCT_TRACKED
     max_samples: int = DEFAULT_MAX_SAMPLES
     max_hit_rows: int = 50  # 컬럼별 행 단위 탐지 상세 retaining limit

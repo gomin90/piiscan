@@ -14,6 +14,7 @@ from PySide6.QtCore import QObject, QThread, Signal
 
 from app.ai import create_ai_engine
 from app.core.analysis_service import analyse_file
+from app.core.progress import ProgressTracker
 from app.metadata_analysis.metadata_service import analyse_metadata_file
 from app.ui.lifecycle import register_thread
 from app.utils.logger import Diagnostics, get_logger
@@ -51,18 +52,19 @@ class MetadataWorker(QThread):
     def run(self) -> None:  # noqa: N802 - Qt naming
         try:
             self.engine = create_ai_engine(self.config, self.hardware)
+            tracker = ProgressTracker(sink=lambda event: self.progress.emit(event.gui_fields()),
+                                      interval=0.3, file_total=len(self.files))
+            self.tracker = tracker
             for index, path in enumerate(self.files, start=1):
                 if self._cancel:
                     break
-                self.progress.emit({"현재 분석 파일": Path(path).name,
-                                    "파일 진행": f"{index}/{len(self.files)}"})
+                tracker.start_file(index, Path(path).name, None)
                 result = analyse_metadata_file(
                     path, self.config, self.engine, mapping=self.mapping,
                     diagnostics=self.diagnostics,
                     should_stop=lambda: self._cancel,
-                    progress=lambda done, total: self.progress.emit({
-                        "처리 metadata Row": done, "전체 metadata Row": total,
-                    }),
+                    tracker=tracker,
+                    progress=lambda done, total: tracker.row_progress(done, total),
                 )
                 self.results.append(result)
                 self.file_finished.emit(result)
@@ -111,25 +113,19 @@ class AnalysisWorker(QThread):
         try:
             self.engine = create_ai_engine(self.config, self.hardware)
             self.progress.emit({"AI 실행 상태": self.engine.summary().get("status", "-")})
+            # The GUI and the CLI read the same ProgressEvent, so the panel shows
+            # the stage, throughput, ETA and AI counters of the running scan.
+            tracker = ProgressTracker(sink=lambda event: self.progress.emit(event.gui_fields()),
+                                      interval=0.3, file_total=len(self.files))
+            self.tracker = tracker
             for index, path in enumerate(self.files, start=1):
                 if index > 1 and self._cancel:
                     break
-                self.progress.emit({
-                    "현재 분석 파일": Path(path).name,
-                    "파일 진행": f"{index}/{len(self.files)}",
-                    "전체 파일 수": len(self.files),
-                })
                 result = analyse_file(
-                    path, self.config, self.engine,
+                    path, self.config, self.engine, progress=tracker,
                     diagnostics=self.diagnostics,
                     should_stop=lambda: self._cancel,
-                    progress=lambda done, total, cells=0, ai_calls=0: self.progress.emit({
-                        "처리 행 수": done,
-                        "전체 행 수": total,
-                        "처리 Cell 수": f"{cells:,}",
-                        "AI 추론 횟수": ai_calls,
-                        "AI 진행률": f"{min(100, ai_calls * 100 // max(1, self.config.max_ai_cell_reviews))}%",
-                    }),
+                    file_index=index, file_total=len(self.files),
                 )
                 self.results.append(result)
                 self.file_finished.emit(result)

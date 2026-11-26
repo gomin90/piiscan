@@ -20,8 +20,9 @@ if __package__ in (None, ""):
 from app import __version__
 from app.ai import create_ai_engine
 from app.ai.gpu_detector import detect_hardware
-from app.config.settings import AnalysisConfig
+from app.config.settings import AnalysisConfig, DEFAULT_MAX_COLS, DEFAULT_MAX_ROWS
 from app.core.analysis_service import analyse_file
+from app.core.progress import ProgressTracker, make_cli_tracker
 from app.export.csv_exporter import write_csv
 from app.export.hit_exporter import (write_cell_records, write_group_records,
                         write_hit_rows, write_record_records, write_row_records)
@@ -67,6 +68,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-ai-row-reviews", type=int, default=100, help="AI Row 문맥 판단 최대")
     parser.add_argument("--max-field-chars", type=int, default=10_000_000,
                         help="CSV 필드 최대 길이 (초과 필드는 parse error로 집계)")
+    parser.add_argument("--max-rows", type=int, default=DEFAULT_MAX_ROWS,
+                        help="분석할 최대 데이터 Row 수 (0 = 무제한). 초과 Row는 미검사로 보고")
+    parser.add_argument("--max-cols", type=int, default=DEFAULT_MAX_COLS,
+                        help="분석할 최대 Col 수 (0 = 무제한). 초과 필드는 미검사로 보고")
+    parser.add_argument("--progress", choices=["auto", "plain", "none"], default="auto",
+                        help="진행 표시: auto(TTY 한 줄 갱신) / plain(주기 로그) / none")
+    parser.add_argument("--progress-interval", type=float, default=0.25,
+                        help="진행 표시 갱신 주기 (초)")
     parser.add_argument("--gui-cell-page-size", type=int, default=200,
                         help="GUI에서 한 화면에 렌더링하는 Cell 상세 수")
     parser.add_argument("--max-ai-column-reviews", type=int, default=200, help="AI 컬럼 판단 최대 횟수")
@@ -97,7 +106,8 @@ def collect_files(args) -> list[str]:
     return files
 
 
-def run_metadata_cli(args, config, files, llm, hardware, diagnostics, logger) -> int:
+def run_metadata_cli(args, config, files, llm, hardware, diagnostics, logger,
+                     tracker: ProgressTracker | None = None) -> int:
     """Function B: DB metadata analysis, kept separate from the table scan."""
     from app.metadata_analysis.field_mapping import FieldMapping
     from app.metadata_analysis.metadata_service import analyse_metadata_file
@@ -124,15 +134,31 @@ def run_metadata_cli(args, config, files, llm, hardware, diagnostics, logger) ->
             # only collect them so the service can validate role/header pairs.
             mapping = {"overrides": {pair.split("=", 1)[0].strip().lower(): pair.split("=", 1)[1].strip()
                                      for pair in args.field_map if "=" in pair}}
+        if tracker is not None:
+            tracker.start_file(files.index(path) + 1, Path(path).name, None)
         result = analyse_metadata_file(path, config, llm, mapping=mapping,
-                                       diagnostics=diagnostics, overrides=overrides or None)
+                                       diagnostics=diagnostics, overrides=overrides or None,
+                                       tracker=tracker,
+                                       progress=(lambda done, total: tracker.row_progress(done, total))
+                                       if tracker is not None else None)
         store = result["store"]
         stores.append(store)
+        if tracker is not None:
+            tracker.export_progress(0, 4)
+            tracker.stage("export")
         columns_path = write_metadata_columns(store, output_dir / f"metadata_columns_{timestamp}.csv")
+        if tracker is not None:
+            tracker.export_progress(1, 4)
         tables_path = write_metadata_tables(store, output_dir / f"metadata_tables_{timestamp}.csv")
+        if tracker is not None:
+            tracker.export_progress(2, 4)
         review_path = write_metadata_review(store, output_dir / f"metadata_review_{timestamp}.csv")
+        if tracker is not None:
+            tracker.export_progress(3, 4)
         summary_path = output_dir / f"metadata_report_{timestamp}.txt"
         write_metadata_summary(store, summary_path, result["summary"])
+        if tracker is not None:
+            tracker.export_progress(4, 4)
         summary = {**result["summary"], "file": path,
                    "field_mapping": result["result"]["mapping"].describe(),
                    "ai": result["result"]["ai"],
@@ -147,10 +173,24 @@ def run_metadata_cli(args, config, files, llm, hardware, diagnostics, logger) ->
         )
         if summary["ai"].get("skipped_reason"):
             logger.info("AI 검토: %s", summary["ai"]["skipped_reason"])
+    if tracker is not None:
+        tracker.stage("cleanup")
     for store in stores:
         status = store.cleanup()
         logger.info("메타정보 저장소: %s (removed=%s)", status["detail_store_path"],
                     status["detail_store_removed"])
+    if tracker is not None:
+        tracker.finish()
+        renderer = getattr(tracker, "renderer", None)
+        if renderer is not None:
+            renderer.finish()
+        logger.info("완료: 파일 %d건 / 분석 metadata Row %d건 / Export %d건"
+                    " / 미검사 Row %d건 / 미검사 Col %d건",
+                    len(summaries),
+                    sum(s.get("metadata_rows", 0) for s in summaries),
+                    4 * len(summaries),
+                    sum(s.get("rows_excluded", 0) for s in summaries),
+                    sum(s.get("columns_excluded", 0) for s in summaries))
     report = {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "analysis_kind": "metadata",
@@ -192,6 +232,8 @@ def run_cli(args) -> int:
     config.ai_cell_reviews = args.ai_cell_reviews
     config.ai_cell_batch_size = max(1, args.ai_cell_batch_size)
     config.max_field_chars = args.max_field_chars
+    config.max_rows = args.max_rows
+    config.max_cols = args.max_cols
     config.gui_cell_page_size = args.gui_cell_page_size
     config.key_columns = list(args.key)
     config.analysis_kind = args.analysis
@@ -210,15 +252,22 @@ def run_cli(args) -> int:
         logger.error("분석할 CSV 파일이 없습니다. --file 또는 --folder 를 지정하세요.")
         return 2
 
+    # Progress goes to stdout unless --json reserves it, in which case the JSON
+    # owns stdout and progress is written to stderr. Logging always uses stderr,
+    # so the two never interleave on one line.
+    tracker = make_cli_tracker(stream=sys.stderr if args.json else sys.stdout,
+                               interval=args.progress_interval, mode=args.progress)
+
     llm = create_ai_engine(config, hardware)
     if config.analysis_kind == "metadata":
-        return run_metadata_cli(args, config, files, llm, hardware, diagnostics, logger)
+        return run_metadata_cli(args, config, files, llm, hardware, diagnostics, logger, tracker)
     results = []
+    written = 0
     try:
         # A temporary detail store must not survive an exception: the finally
         # block below always releases it (important on Windows, where a leaked
         # WAL file keeps the directory dirty).
-        for path in files:
+        for index, path in enumerate(files, start=1):
             overrides = {}
             if args.encoding:
                 overrides["encoding"] = args.encoding
@@ -226,9 +275,13 @@ def run_cli(args) -> int:
                 overrides["delimiter"] = args.delimiter if args.delimiter != "\\t" else "\t"
             if args.header:
                 overrides["has_header"] = args.header == "yes"
-            result = analyse_file(path, config, llm, diagnostics=diagnostics, overrides=overrides)
+            result = analyse_file(path, config, llm, progress=tracker, diagnostics=diagnostics,
+                                  overrides=overrides, file_index=index, file_total=len(files))
             results.append(result)
             counts = result.cell_counts
+            if not result.scope.get("complete", True):
+                logger.warning(
+                    "분석 범위 제한: %s", result.scope.get("text", "-"))
             logger.info(
                 "%s -> Row %d / Cell %d 전수 검사, 개인정보 Row %d건, 컬럼-유형 %d건, "
                 "위험도 높음 %d건 (%.2fs)",
@@ -264,15 +317,31 @@ def run_cli(args) -> int:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path(args.output_dir)
         flat_results = [row for result in results for row in result.results]
+        total_exports = 7 if not args.no_cell_report else 6
+        tracker.export_progress(0, total_exports)
+        tracker.stage("export")
+
+        def exported(path: str | Path) -> None:
+            nonlocal written
+            written += 1
+            tracker.export_progress(written, total_exports)
+
         csv_path = write_csv(flat_results, output_dir / f"privacy_results_{timestamp}.csv")
+        exported(csv_path)
         txt_path = write_txt(results, output_dir / f"privacy_report_{timestamp}.txt")
+        exported(txt_path)
         hits_path = write_hit_rows(results, output_dir / f"privacy_hits_{timestamp}.csv")
+        exported(hits_path)
         rows_path = write_row_records(results, output_dir / f"privacy_rows_{timestamp}.csv")
+        exported(rows_path)
         cell_report = ""
         if not args.no_cell_report:
             cell_report = write_cell_records(results, output_dir / f"privacy_cells_{timestamp}.csv")
+            exported(cell_report)
         records_path = write_record_records(results, output_dir / f"privacy_records_{timestamp}.csv")
+        exported(records_path)
         groups_path = write_group_records(results, output_dir / f"privacy_groups_{timestamp}.csv")
+        exported(groups_path)
         logger.info("결과: %s / %s / %s / %s%s (Export %d Cell hit / %d Row / %d Cell verdict)",
                     csv_path, txt_path, hits_path, rows_path,
                     " / " + cell_report if cell_report else "",
@@ -282,6 +351,7 @@ def run_cli(args) -> int:
                     write_record_records.rows_written, write_group_records.rows_written,
                     records_path, groups_path)
     finally:
+        tracker.stage("cleanup")
         cleanup: list[dict] = []
         handled: set[str] = set()
         for result in results:
@@ -296,6 +366,18 @@ def run_cli(args) -> int:
                             status["detail_store_path"], status["detail_store_removed"])
             else:
                 logger.info("상세 저장소 유지 (--detail-store): %s", status["detail_store_path"])
+        processed_rows = sum(result.rows_parsed for result in results)
+        processed_cells = sum(result.cell_counts.get("cells_inspected", 0) for result in results)
+        excluded_rows = sum(result.scope.get("rows_excluded", 0) for result in results)
+        excluded_cols = sum(result.scope.get("columns_excluded", 0) for result in results)
+        tracker.finish()
+        renderer = getattr(tracker, "renderer", None)
+        if renderer is not None:
+            renderer.finish()
+        logger.info("완료: 파일 %d건 / 분석 Row %d건 / Cell %d건 / Export %d건"
+                    " / 미검사 Row %d건 / 미검사 Col %d건",
+                    len(results), processed_rows, processed_cells, written,
+                    excluded_rows, excluded_cols)
     for result in results:
         result.cell_counts["detail_store_cleanup"] = next(
             (c["detail_store_removed"] for c in cleanup

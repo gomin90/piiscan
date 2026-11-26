@@ -23,6 +23,7 @@ from app.core.cell_verdict import (
 from app.core.detail_store import DetailStore
 from app.core import temp_store
 from app.core.privacy_engine import PrivacyEngine
+from app.core.progress import ProgressTracker
 from app.core.result_aggregator import build_results
 from app.utils.logger import Diagnostics, get_logger
 
@@ -58,12 +59,14 @@ class FileResult:
     preview: list = field(default_factory=list)
     timings: dict = field(default_factory=dict)
     resumed_from: int = 0
+    scope: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {
             "path": self.path,
             "settings": self.settings,
             "format": self.profile,
+            "analysis_scope": self.scope,
             "rows_parsed": self.rows_parsed,
             "rows_error": self.rows_error,
             "rows_empty": self.rows_empty,
@@ -395,10 +398,12 @@ def analyse_file(
     path: str | Path,
     config: AnalysisConfig | None = None,
     llm=None,
-    progress: callable = None,
+    progress=None,
     diagnostics: Diagnostics | None = None,
     overrides: dict | None = None,
     should_stop: callable = None,
+    file_index: int = 1,
+    file_total: int = 1,
 ) -> FileResult:
     config = config or AnalysisConfig()
     logger = get_logger()
@@ -406,7 +411,29 @@ def analyse_file(
     started = time.perf_counter()
     path = str(path)
 
+    # `progress` is either the shared ProgressTracker or the legacy callable
+    # (done, total, cells[, ai_calls]) that older callers and tests use.
+    if isinstance(progress, ProgressTracker):
+        tracker = progress
+    elif callable(progress):
+        import inspect
+
+        positional = [p for p in inspect.signature(progress).parameters.values()
+                      if p.kind in (inspect.Parameter.POSITIONAL_ONLY,
+                                    inspect.Parameter.POSITIONAL_OR_KEYWORD)]
+
+        def legacy_sink(event: ProgressEvent) -> None:
+            args = [event.rows_done, event.rows_total or 0, event.cells_done, event.ai_judged]
+            progress(*args[:min(len(args), len(positional))])
+
+        tracker = ProgressTracker(sink=legacy_sink)
+    else:
+        tracker = ProgressTracker()
+    tracker.file_total = max(1, file_total)
+    tracker.start_file(file_index, Path(path).name, None)
+
     # 1단계: 파일 형식 검사
+    tracker.stage("format")
     profile = detect_format(path)
     overrides = dict(overrides or {})
     overrides.setdefault("table", config.table)
@@ -416,12 +443,42 @@ def analyse_file(
     diagnostics.record("format_detected", encoding=settings.encoding, delimiter=repr(settings.delimiter),
                        header=settings.has_header, columns=profile.column_count)
 
-    loader = CsvLoader(settings, max_field_chars=config.max_field_chars)
+    loader = CsvLoader(settings, max_field_chars=config.max_field_chars, max_cols=config.max_cols)
     loader.prepare()
     mode = detect_analysis_mode(loader.total_rows or 0, config.mode, config.sample_rows)
     # "sampling" genuinely truncates the scan; "full"/"auto" stream every row.
-    row_limit = config.sample_rows if config.mode == "sampling" else None
+    # max_rows is a hard bound on the same run: it never allocates anything, it only
+    # stops the stream. A file smaller than the bound is analysed to its real end.
+    limits = [limit for limit in (config.max_rows,
+                                 config.sample_rows if config.mode == "sampling" else 0)
+              if limit and limit > 0]
+    row_limit = min(limits) if limits else None
+    rows_in_scope = loader.progress_total(row_limit)
+    rows_excluded = max(0, (loader.total_rows or 0) - rows_in_scope) if row_limit else 0
+    columns_excluded = loader.columns_excluded
     diagnostics.record("analysis_mode", mode=mode, row_limit=row_limit)
+    scope = {
+        "max_rows": config.max_rows,
+        "max_cols": config.max_cols,
+        "file_rows": loader.total_rows,
+        "file_columns": loader.source_width,
+        "rows_in_scope": rows_in_scope,
+        "rows_excluded": rows_excluded,
+        "columns_in_scope": loader.column_count,
+        "columns_excluded": columns_excluded,
+        "complete": rows_excluded == 0 and columns_excluded == 0,
+    }
+    scope["text"] = (
+        f"Row {rows_in_scope:,} / {loader.total_rows:,}, Col {loader.column_count}"
+        + (f" (미검사 Row {rows_excluded:,}, Col {columns_excluded})"
+           if rows_excluded or columns_excluded else "")
+    )
+    if rows_excluded or columns_excluded:
+        diagnostics.record("analysis_range_truncated", **scope)
+    else:
+        diagnostics.record("analysis_range", **scope)
+    tracker.start_file(file_index, Path(path).name, rows_in_scope)
+    tracker.set_scope(**scope)
 
     # 2단계: 스트리밍 규칙 기반 전수 분석 (batch 1,000행)
     # Each file gets its own database unless the user named one explicitly; in
@@ -443,11 +500,35 @@ def analyse_file(
     temp_store.register_store(store)
     # `--resume` continues a cancelled run of the same file. The checkpoint is
     # read before registration so it is not overwritten by it.
+    checkpoint = store.checkpoint_scope() if config.resume else None
     resume_from = store.resume_row() if config.resume else 0
+    if resume_from and checkpoint:
+        mismatch: list[str] = []
+        if Path(checkpoint["file"]).resolve() != Path(path).resolve():
+            mismatch.append(f"체크포인트 파일 {checkpoint['file']} != {path}")
+        if checkpoint["db_schema"] != settings.schema or checkpoint["db_table"] != settings.table:
+            mismatch.append("테이블/스키마 identifier 가 체크포인트와 다름")
+        if checkpoint["max_cols"] and checkpoint["max_cols"] != (config.max_cols or 0):
+            mismatch.append(f"max_cols 변경 (체크포인트 {checkpoint['max_cols']} -> 현재 {config.max_cols})")
+        if checkpoint["column_count"] and checkpoint["column_count"] != loader.column_count:
+            mismatch.append(f"분석 Col 수 변경 (체크포인트 {checkpoint['column_count']} -> 현재 {loader.column_count})")
+        if mismatch:
+            # A checkpoint recorded under a different column range cannot be
+            # extended safely: re-analyse from row 1 instead of mixing two layouts.
+            logger.warning("Resume 불가 - 분석 범위가 변경됨: %s", "; ".join(mismatch))
+            diagnostics.record("resume_scope_mismatch", checkpoint=checkpoint,
+                               current={"max_rows": config.max_rows, "max_cols": config.max_cols,
+                                       "column_count": loader.column_count},
+                               problems=mismatch)
+            store.reset_checkpoint(config.max_rows, config.max_cols, loader.column_count)
+            resume_from = 0
+        else:
+            diagnostics.record("resume_checkpoint", resumed_from_row=resume_from,
+                               checkpoint_rows=checkpoint["max_rows"],
+                               checkpoint_cols=checkpoint["max_cols"])
     store.register_run(path, settings.schema, settings.table, settings.db_type,
-                       resume=bool(resume_from))
-    if resume_from:
-        diagnostics.record("resume_checkpoint", resumed_from_row=resume_from)
+                       resume=bool(resume_from), max_rows=config.max_rows,
+                       max_cols=config.max_cols, column_count=loader.column_count)
     engine = PrivacyEngine(config, store)
     # KEY columns are chosen by the user, never guessed: an unmatched name is
     # reported as ignored instead of silently narrowing the scan.
@@ -485,7 +566,7 @@ def analyse_file(
     last_progress_cells = 0
     batch_seconds = 0.0
 
-    def report_progress() -> None:
+    def report_progress(force: bool = False) -> None:
         """Advance progress on rows *and* cell throughput.
 
         A 10,000-column file with 100 rows is one tenth of a million cells of
@@ -493,23 +574,26 @@ def analyse_file(
         that the scan is actually making progress.
         """
         nonlocal last_progress_rows, last_progress_cells
-        if not progress:
-            return
         if (loader.parsed_rows - last_progress_rows >= 5000
                 or engine.cells_inspected - last_progress_cells >= 200_000
-                or loader.parsed_rows >= loader.progress_total()):
+                or loader.parsed_rows >= loader.progress_total(row_limit)
+                or force):
             last_progress_rows = loader.parsed_rows
             last_progress_cells = engine.cells_inspected
-            progress(loader.parsed_rows, loader.progress_total(), engine.cells_inspected)
-    for index, row in loader.iter_rows():
+            tracker.row_progress(loader.parsed_rows, loader.progress_total(row_limit),
+                                 errors=loader.error_rows, empty=loader.empty_rows,
+                                 unparsed=loader.unparsed_rows)
+            tracker.cell_progress(engine.cells_inspected)
+            tracker.emit(force=force or loader.parsed_rows >= loader.progress_total(row_limit))
+
+    tracker.stage("stream")
+    # The cap is applied inside the loader, so it bounds the whole run (checkpoint
+    # rows included) and never re-reads rows a resume already decided.
+    for index, row in loader.iter_rows(row_limit):
         # `loader` numbers rows from 0 while the ledger numbers them from 1, so a
         # checkpoint of 40 means rows 1..40 are already decided.
         if resume_from and index < resume_from:
             continue
-        if row_limit is not None and engine.rows_analysed >= row_limit:
-            diagnostics.record("sampling_cutoff", rows_analysed=engine.rows_analysed,
-                               total_rows=loader.total_rows)
-            break
         if should_stop is not None and should_stop():
             diagnostics.record("analysis_cancelled", rows_analysed=engine.rows_analysed,
                                cells_inspected=engine.cells_inspected,
@@ -536,6 +620,12 @@ def analyse_file(
         store.mark_last_row(resume_from + engine.rows_analysed)
         report_progress()
 
+    if loader.row_limit_reached:
+        diagnostics.record("row_limit_cutoff", rows_analysed=loader.parsed_rows,
+                           row_limit=row_limit, max_rows=config.max_rows,
+                           total_rows=loader.total_rows,
+                           rows_excluded=loader.rows_excluded)
+
     findings = engine.finalise(stats)
     row_records = engine.finalise_verdicts(stats)
     cell_counts = engine.cell_counts()
@@ -544,6 +634,7 @@ def analyse_file(
     if not completeness["complete"]:
         logger.error("Cell ledger incomplete: %d logical cells, %d verdicts",
                      completeness["logical_cells"], completeness["verdict_cells"])
+    review_queue = store.human_review_count()
     diagnostics.record("rows_parsed", parsed=loader.parsed_rows, errors=loader.error_rows,
                        unparsed=loader.unparsed_rows, empty=loader.empty_rows,
                        irregular=loader.irregular_rows, short=loader.short_rows,
@@ -562,12 +653,14 @@ def analyse_file(
     ai_judgements: dict[str, dict] = {}
     ai_audit = {"selected": 0, "skipped": 0, "attempts": 0, "success": 0, "failed": 0,
                 "policy": config.ai_column_reviews, "limit": config.max_ai_column_reviews}
+    tracker.stage("ai_column")
     if llm.load():
         candidates = ai_column_candidates(findings, config)
         selected = select_column_candidates(candidates, config.max_ai_column_reviews)
         ai_audit["candidates"] = len(candidates)
         ai_audit["selected"] = len(selected)
         ai_audit["skipped"] = len(findings) - len(selected)
+        tracker.ai_progress(candidates=len(candidates), judged=0, skipped=ai_audit["skipped"])
         for item in selected:
             finding = item["finding"]
             ai_audit["attempts"] += 1
@@ -577,6 +670,10 @@ def analyse_file(
                 ai_judgements[finding["column"]] = judgement
             else:
                 ai_audit["failed"] += 1
+            tracker.ai_progress(candidates=len(candidates), judged=ai_audit["attempts"],
+                                success=ai_audit["success"], failed=ai_audit["failed"],
+                                skipped=ai_audit["skipped"])
+            tracker.emit()
             rss_mb = llm.memory_usage().get("rss_mb") or 0
             if rss_mb > 3500:
                 logger.warning("RAM 한계 감지 -> AI 추론 중단, 규칙 기반 결과 보존")
@@ -589,14 +686,27 @@ def analyse_file(
                                    candidates=len(candidates), selected=len(selected))
         # Cell-level semantic judgement: the rules inspected every cell, the model
         # is asked only about the cells the rules could not settle.
-        def ai_progress(ai_cells: int) -> None:
-            if progress is not None:
-                progress(loader.parsed_rows, loader.progress_total(), engine.cells_inspected, ai_cells)
+        tracker.stage("ai_cell")
+
+        def ai_progress(cell_audit) -> None:
+            # `review_cells` reports the running audit dict; older call sites pass
+            # only the attempted count, so accept either shape.
+            if not isinstance(cell_audit, dict):
+                cell_audit = {"attempted": int(cell_audit)}
+            tracker.ai_progress(candidates=cell_audit.get("candidates", 0),
+                                judged=cell_audit.get("attempted", 0),
+                                batches=cell_audit.get("batches", 0),
+                                reused=cell_audit.get("reused", 0),
+                                success=cell_audit.get("success", 0),
+                                failed=cell_audit.get("failed", 0),
+                                skipped=cell_audit.get("skipped", 0))
+            tracker.emit()
 
         review_cells(store, llm, findings, config, ai_audit, diagnostics, report_ai=ai_progress)
         # Row 문맥 판정은 규칙이 결론 내리지 못한 Row에만, 제한된 횟수만큼 호출된다.
         # 후보는 detail cache가 아니라 전체 store에서 뽑는다: cap 때문에 AI이 파일
         # 앞부분 Row만 보는 편향을 막는다.
+        tracker.stage("ai_row")
         review_candidates = store.review_rows(config.max_ai_row_reviews)
         total_candidates = store.review_row_count()
         row_audit = {"candidates": total_candidates, "attempts": 0, "success": 0,
@@ -612,6 +722,10 @@ def analyse_file(
                     cached.ai_review = verdict
             else:
                 row_audit["failed"] += 1
+            tracker.ai_progress(candidates=row_audit["candidates"], judged=row_audit["attempts"],
+                                success=row_audit["success"], failed=row_audit["failed"],
+                                skipped=row_audit["skipped"])
+            tracker.emit()
             if llm.memory_usage().get("rss_mb", 0) > 3500:
                 logger.warning("RAM 한계 감지 -> AI Row 추론 중단, 규칙 기반 결과 보존")
                 row_audit["skipped"] += len(review_candidates) - row_audit["attempts"]
@@ -628,6 +742,10 @@ def analyse_file(
     llm.close()
     ai_summary = llm.summary()
 
+    # 7단계: 규칙 판정과 AI 판정 병합, Human Review 대상 확정
+    tracker.stage("merge")
+    tracker.set_review_pending(review_queue["cells"])
+    tracker.stage("review")
     results = build_results(
         file=Path(path).name,
         db_type=settings.db_type,
@@ -647,6 +765,7 @@ def analyse_file(
         settings={"encoding": settings.encoding, "delimiter": settings.delimiter,
                   "header": settings.has_header, "table": settings.table, "schema": settings.schema,
                   "db_type": settings.db_type, "mode": mode, "size_bytes": file_size(path),
+                  "max_rows": config.max_rows, "max_cols": config.max_cols,
                   "analysed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")},
         profile=profile.as_dict(),
         rows_parsed=loader.parsed_rows,
@@ -675,4 +794,5 @@ def analyse_file(
         timings={"rules": round(engine.elapsed_rules, 3), "batch": round(batch_seconds, 3)},
         cancelled=cancelled,
         resumed_from=resume_from,
+        scope=scope,
     )

@@ -31,11 +31,27 @@ class AnalysisWindow(QWidget):
             "처리 행 수",
             "전체 행 수",
             "처리 Cell 수",
+            "현재 단계",
+            "진행률",
+            "경과 시간",
+            "예상 잔여 시간(ETA)",
+            "처리 속도",
+            "분석 범위",
+            "AI 후보",
             "AI 추론 횟수",
+            "AI batch",
+            "AI Reuse",
+            "AI 성공/실패/불가",
+            "Human Review 대기",
+            "Export 진행",
             "AI 진행률",
             "개인정보 Row 수",
-            "Row 상세 저장", "Cell 상세 저장", "Cell 판정 저장",
-            "AI 판단(컬럼)", "AI 판단(Cell)", "AI 판단(Row)", "AI batch",
+            "Row 상세 저장",
+            "Cell 상세 저장",
+            "Cell 판정 저장",
+            "AI 판단(컬럼)",
+            "AI 판단(Cell)",
+            "AI 판단(Row)",
             "현재 분석 컬럼",
             "탐지된 개인정보 유형",
             "발견된 컬럼 수",
@@ -57,7 +73,8 @@ class AnalysisWindow(QWidget):
         for key, value in values.items():
             if key in self.labels:
                 self.labels[key].setText(str(value))
-        if "처리 행 수" in values and "전체 행 수" in values:
-            total = values.get("전체 행 수") or 0
-            done = values.get("처리 행 수") or 0
-            self.progress.setValue(int(done * 100 / total) if total else 0)
+        percent = values.get("progress_percent")
+        if percent is not None:
+            # None means the denominator is genuinely unknown: keep the bar at its
+            # previous value rather than inventing a percentage.
+            self.progress.setValue(int(percent))

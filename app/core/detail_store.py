@@ -143,8 +143,17 @@ class DetailStore:
             "db_table TEXT NOT NULL DEFAULT '', db_type TEXT NOT NULL DEFAULT '', "
             "logical_cells INTEGER NOT NULL DEFAULT 0, key_cells INTEGER NOT NULL DEFAULT 0, "
             "last_row INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'running', "
-            "created_at TEXT NOT NULL DEFAULT '')"
+            "created_at TEXT NOT NULL DEFAULT '', "
+            "max_rows INTEGER NOT NULL DEFAULT 0, max_cols INTEGER NOT NULL DEFAULT 0, "
+            "column_count INTEGER NOT NULL DEFAULT 0)"
         )
+        # Stores created before the analysis-range feature have no scope columns;
+        # add them so an old checkpoint can still be read and compared.
+        for column in ("max_rows", "max_cols", "column_count"):
+            try:
+                self._exec(f"ALTER TABLE runs ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
+            except Exception:
+                pass  # the column already exists
         # One status byte per column of one source row.
         self._exec(
             "CREATE TABLE IF NOT EXISTS row_status ("
@@ -300,11 +309,13 @@ class DetailStore:
 
     # ---------------------------------------------------------------- identity
     def register_run(self, file: str, schema: str = "", table: str = "", db_type: str = "",
-                     resume: bool = False) -> int:
+                     resume: bool = False, max_rows: int = 0, max_cols: int = 0,
+                     column_count: int = 0) -> int:
         """Register this analysis and return its `table_id` (row identity namespace).
 
         A resumed run keeps its checkpoint: `last_row` is only reset when the
-        analysis starts from the beginning.
+        analysis starts from the beginning. The requested analysis range is stored
+        so a later `--resume` can check it against the checkpoint.
         """
         table_id = int.from_bytes(
             hashlib.sha1(f"{schema}|{table}|{file}".encode("utf-8")).digest()[:4], "big"
@@ -312,21 +323,43 @@ class DetailStore:
         self.table_id = table_id
         if resume:
             self._exec(
-                "INSERT INTO runs (analysis_id, kind, file, table_id, db_schema, db_table, db_type) "
-                "VALUES (?,?,?,?,?,?,?) ON CONFLICT(analysis_id) DO UPDATE SET "
+                "INSERT INTO runs (analysis_id, kind, file, table_id, db_schema, db_table, db_type, "
+                "max_rows, max_cols, column_count) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(analysis_id) DO UPDATE SET "
                 "kind = excluded.kind, file = excluded.file, table_id = excluded.table_id, "
                 "db_schema = excluded.db_schema, db_table = excluded.db_table, "
-                "db_type = excluded.db_type",
-                (self.analysis_id, self.kind, file, table_id, schema, table, db_type),
+                "db_type = excluded.db_type, max_rows = excluded.max_rows, "
+                "max_cols = excluded.max_cols, column_count = excluded.column_count",
+                (self.analysis_id, self.kind, file, table_id, schema, table, db_type,
+                 max_rows, max_cols, column_count),
             )
         else:
             self._exec(
-                "INSERT OR REPLACE INTO runs (analysis_id, kind, file, table_id, db_schema, db_table, db_type) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (self.analysis_id, self.kind, file, table_id, schema, table, db_type),
+                "INSERT OR REPLACE INTO runs (analysis_id, kind, file, table_id, db_schema, db_table, "
+                "db_type, max_rows, max_cols, column_count) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (self.analysis_id, self.kind, file, table_id, schema, table, db_type,
+                 max_rows, max_cols, column_count),
             )
         self._commit()
         return table_id
+
+    def checkpoint_scope(self) -> dict | None:
+        """The range recorded by a previous run of this file, or None if absent."""
+        row = self._exec(
+            "SELECT file, db_schema, db_table, last_row, max_rows, max_cols, column_count "
+            "FROM runs WHERE analysis_id = ?", (self.analysis_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return {"file": row[0], "db_schema": row[1], "db_table": row[2], "last_row": int(row[3]),
+                "max_rows": int(row[4]), "max_cols": int(row[5]), "column_count": int(row[6])}
+
+    def reset_checkpoint(self, max_rows: int = 0, max_cols: int = 0, column_count: int = 0) -> None:
+        """Discard a checkpoint that cannot be continued (changed analysis range)."""
+        self._exec("UPDATE runs SET last_row = 0, status = 'running', max_rows = ?, max_cols = ?, "
+                   "column_count = ? WHERE analysis_id = ?",
+                   (max_rows, max_cols, column_count, self.analysis_id))
+        self._commit()
 
     def register_columns(self, names: Iterable[str]) -> None:
         """Record the column layout (headers plus any EXTRA_COL_n) for this run."""
@@ -885,6 +918,16 @@ class DetailStore:
             return self.logical_cell_count()
         breakdown = self.status_breakdown()
         return breakdown.get(status, 0)
+
+    def human_review_count(self) -> dict:
+        """Cells/rows still awaiting a human decision after rules and AI merge."""
+        self.flush()
+        row = self._exec(
+            "SELECT COUNT(*) AS cells, COUNT(DISTINCT row) AS rows FROM cell_detail "
+            "WHERE analysis_id = ? AND needs_review = 1",
+            (self.analysis_id,),
+        ).fetchone()
+        return {"cells": int(row[0]), "rows": int(row[1])}
 
     def candidate_count(self, statuses: tuple[str, ...]) -> int:
         self.flush()

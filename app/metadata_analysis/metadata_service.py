@@ -83,20 +83,30 @@ class MetadataService:
         self.error_rows = 0
         self.skipped_rows = 0
         self.empty_rows = 0
+        self.range_scope: dict = {}
         self._started = time.perf_counter()
         self.rules_seconds = 0.0
         self.ai_seconds = 0.0
 
     def analyse(self, path: str, mapping=None, progress=None, should_stop=None,
-                overrides: dict | None = None) -> dict:
+                overrides: dict | None = None, tracker=None) -> dict:
+        if tracker is not None:
+            tracker.stage("format")
         profile = detect_format(path)
         overrides = dict(overrides or {})
         overrides.setdefault("table", self.config.table)
         overrides.setdefault("schema", self.config.schema)
         overrides.setdefault("db_type", self.config.db_type)
         settings = FileSettings.from_profile(profile, **overrides)
-        loader = CsvLoader(settings, max_field_chars=self.config.max_field_chars)
+        loader = CsvLoader(settings, max_field_chars=self.config.max_field_chars,
+                           max_cols=self.config.max_cols)
         loader.prepare()
+        # The row/col caps apply to the metadata scan as well; rows past the cap are
+        # counted as unexamined rather than assumed clean.
+        row_limits = [limit for limit in (self.config.max_rows,
+                                         self.config.sample_rows if self.config.mode == "sampling" else 0)
+                      if limit and limit > 0]
+        row_limit = min(row_limits) if row_limits else None
         if isinstance(mapping, dict):
             resolved = FieldMapping.from_headers(loader.column_names)
             for role, header in (mapping.get("overrides") or {}).items():
@@ -108,9 +118,25 @@ class MetadataService:
         if not ok:
             raise ValueError(message)
 
+        rows_in_scope = loader.progress_total(row_limit)
+        rows_excluded = max(0, (loader.total_rows or 0) - rows_in_scope) if row_limit else 0
+        if tracker is not None:
+            tracker.set_scope(max_rows=self.config.max_rows, max_cols=self.config.max_cols,
+                              file_rows=loader.total_rows, file_columns=loader.source_width,
+                              rows_in_scope=rows_in_scope, rows_excluded=rows_excluded,
+                              columns_in_scope=loader.column_count,
+                              columns_excluded=loader.columns_excluded,
+                              complete=rows_excluded == 0 and loader.columns_excluded == 0,
+                              text=(f"Row {rows_in_scope:,} / {loader.total_rows:,}, "
+                                    f"Col {loader.column_count}"
+                                    + (f" (미검사 Row {rows_excluded:,}, Col {loader.columns_excluded})"
+                                       if rows_excluded or loader.columns_excluded else "")))
+            tracker.stage("stream")
+            tracker.row_progress(0, rows_in_scope)
+
         ambiguous: list[ColumnMetadata] = []
         batch: list[tuple] = []
-        for _row_index, row in loader.iter_rows():
+        for _row_index, row in loader.iter_rows(row_limit):
             if should_stop is not None and should_stop():
                 break
             try:
@@ -137,21 +163,41 @@ class MetadataService:
                 self._write_records(batch)
                 batch.clear()
             if progress and self.rows_read % 500 == 0:
-                progress(self.rows_read, loader.total_rows or self.rows_read)
+                progress(self.rows_read, rows_in_scope)
         if batch:
             self._write_records(batch)
+        if tracker is not None:
+            tracker.row_progress(self.rows_read, rows_in_scope)
         self.empty_rows = loader.empty_rows
         self.store.commit()
         # Every source row must be accounted for: analysed, unusable, or
         # genuinely empty. Nothing is allowed to vanish silently.
+        rows_in_scope = loader.progress_total(row_limit)
+        self.range_scope = {"rows_in_scope": rows_in_scope,
+                            "rows_excluded": max(0, (loader.total_rows or 0) - rows_in_scope),
+                            "columns_excluded": loader.columns_excluded}
         diagnostics = {"metadata_rows": self.rows_read, "skipped_rows": self.skipped_rows,
-                       "parse_error_rows": self.error_rows, "empty_rows": self.empty_rows}
-        if diagnostics["metadata_rows"] + diagnostics["skipped_rows"] + diagnostics["empty_rows"] + self.error_rows != loader.total_rows:
-            logger.warning("메타정보 Row accounting mismatch: %s vs total %s",
-                           diagnostics, loader.total_rows)
+                       "parse_error_rows": self.error_rows, "empty_rows": self.empty_rows,
+                       "rows_in_scope": rows_in_scope,
+                       "rows_excluded": max(0, (loader.total_rows or 0) - rows_in_scope),
+                       "columns_excluded": loader.columns_excluded}
+        if (diagnostics["metadata_rows"] + diagnostics["skipped_rows"]
+                + diagnostics["empty_rows"] + self.error_rows != rows_in_scope):
+            logger.warning("메타정보 Row accounting mismatch: %s vs in-scope %s",
+                           diagnostics, rows_in_scope)
         self.rules_seconds = time.perf_counter() - self._started
 
+        if tracker is not None:
+            tracker.stage("ai_column")
+            tracker.ai_progress(candidates=len(ambiguous))
         ai_audit = self._apply_ai(ambiguous)
+        if tracker is not None:
+            tracker.stage("merge")
+            tracker.ai_progress(judged=ai_audit.get("attempts", 0),
+                                success=ai_audit.get("success", 0),
+                                failed=ai_audit.get("failed", 0),
+                                skipped=ai_audit.get("skipped", 0))
+            tracker.stage("review")
         self._write_verdicts()
         tables = self._aggregate_tables()
         return {
@@ -270,6 +316,8 @@ class MetadataService:
         return {
             "analysis_kind": "metadata",
             "metadata_rows": self.rows_read,
+            "rows_excluded": self.range_scope.get("rows_excluded", 0),
+            "columns_excluded": self.range_scope.get("columns_excluded", 0),
             "parse_error_rows": self.error_rows,
             "skipped_rows": self.skipped_rows,
             "empty_rows": self.empty_rows,
@@ -284,7 +332,7 @@ class MetadataService:
 def analyse_metadata_file(path: str, config: AnalysisConfig, llm=None,
                           mapping=None, progress=None, should_stop=None,
                           diagnostics: Diagnostics | None = None,
-                          overrides: dict | None = None) -> dict:
+                          overrides: dict | None = None, tracker=None) -> dict:
     diagnostics = diagnostics or Diagnostics()
     temp_dir: Path | None = None
     if config.detail_store_path:
@@ -302,7 +350,7 @@ def analyse_metadata_file(path: str, config: AnalysisConfig, llm=None,
     service = MetadataService(config, store, llm)
     service._started = time.perf_counter()
     result = service.analyse(path, mapping=mapping, progress=progress,
-                            should_stop=should_stop, overrides=overrides)
+                            should_stop=should_stop, overrides=overrides, tracker=tracker)
     diagnostics.record("metadata_scan", **service.summary())
     diagnostics.record("field_mapping", **result["mapping"].describe())
     return {

@@ -112,5 +112,11 @@ def write_metadata_summary(store, path: str | Path, summary: dict) -> None:
         handle.write("=" * 52 + "\n")
         for key, value in summary.items():
             handle.write(f"{key}: {value}\n")
+        if summary.get("rows_excluded") or summary.get("columns_excluded"):
+            handle.write(
+                f"\n경고: 상한(max_rows/max_cols) 초과로 Row {summary.get('rows_excluded', 0):,}건 / "
+                f"Col {summary.get('columns_excluded', 0)}건은 분석되지 않았다. "
+                f"이 결과는 전수 분석이 아니다.\n"
+            )
         handle.write("\n주의: 메타정보만으로 개인정보 존재를 확정할 수 없습니다.\n")
         handle.write(" 모든 '개인정보 관련' 항목은 실제 값 확인 후 관리 대상에 포함해야 합니다.\n")

@@ -22,6 +22,8 @@ def write_txt(file_results: list, output: str | Path) -> str:
 
     total_rows = sum(result.rows_parsed for result in file_results)
     total_cells = sum(result.cell_counts.get("cells_inspected", 0) for result in file_results)
+    total_excluded_rows = sum((result.scope or {}).get("rows_excluded", 0) for result in file_results)
+    total_excluded_cols = sum((result.scope or {}).get("columns_excluded", 0) for result in file_results)
     pii_rows = sum(result.cell_counts.get("detail_rows_stored", 0) for result in file_results)
     pii_columns = sum(1 for result in file_results for r in result.results)
     high_risk = sum(1 for result in file_results for r in result.results if r.risk_level in ("매우 높음", "높음"))
@@ -29,6 +31,8 @@ def write_txt(file_results: list, output: str | Path) -> str:
     lines.append("[전체 요약]")
     lines.append(f"  분석 파일 수: {len(file_results)}")
     lines.append(f"  분석 행 수: {total_rows:,}")
+    if total_excluded_rows or total_excluded_cols:
+        lines.append(f"  상한 때문에 미검사: Row {total_excluded_rows:,} / Col {total_excluded_cols:,}")
     lines.append(f"  전수 검사 Cell 수: {total_cells:,}")
     lines.append(f"  개인정보 Cell이 발견된 Row 수: {pii_rows:,}")
     lines.append(f"  개인정보 컬럼-유형 항목: {pii_columns}")
@@ -41,6 +45,16 @@ def write_txt(file_results: list, output: str | Path) -> str:
         lines.append(f"  테이블: {result.settings.get('table', '')} / 스키마: {result.settings.get('schema', '') or '없음'}")
         lines.append(f"  인코딩: {result.settings.get('encoding')} | 구분자: {repr(result.settings.get('delimiter'))} | 헤더: {result.settings.get('header')}")
         lines.append(f"  분석 방식: {result.settings.get('mode')} | 분석 행: {result.rows_parsed:,} (오류 {result.rows_error}, 빈 행 {result.rows_empty})")
+        scope = result.scope or {}
+        if scope:
+            lines.append(
+                f"  분석 범위: Row {scope.get('rows_in_scope', 0):,} / 파일 Row {scope.get('file_rows', 0):,} "
+                f"(미검사 Row {scope.get('rows_excluded', 0):,}) | Col {scope.get('columns_in_scope', 0)} "
+                f"/ 파일 Col {scope.get('file_columns', 0)} (미검사 Col {scope.get('columns_excluded', 0)}) | "
+                f"상한 max_rows={scope.get('max_rows', 0):,}, max_cols={scope.get('max_cols', 0):,}"
+            )
+            if not scope.get("complete", True):
+                lines.append("  경고: 상한 초과로 일부 Row/Col는 검사되지 않았다. 이 결과는 전체 파일 전수 검사가 아니다.")
         lines.append(f"  소요 시간: {result.elapsed_seconds:.2f}s | AI: {result.ai_summary.get('status', '미사용')}")
         counts = result.cell_counts
         rows_short = counts.get("rows_short", result.rows_short)

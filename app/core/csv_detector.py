@@ -94,11 +94,16 @@ def logical_rows(text: str, delimiter: str, limit: int = 400) -> list[list[str]]
     these records so a quoted comma, tab, semicolon or newline cannot split a row.
     """
     rows: list[list[str]] = []
-    for row in csv.reader(io.StringIO(text, newline=""), delimiter=delimiter):
-        if row:
-            rows.append(row)
-        if len(rows) >= limit:
-            break
+    try:
+        for row in csv.reader(io.StringIO(text, newline=""), delimiter=delimiter):
+            if row:
+                rows.append(row)
+            if len(rows) >= limit:
+                break
+    except csv.Error:
+        # `csv.field_size_limit` is process global and another reader may have
+        # lowered it; keep whatever parsed so far instead of aborting detection.
+        pass
     return rows
 
 

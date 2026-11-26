@@ -41,6 +41,10 @@ python app/main.py --analysis metadata --file metadata.csv --field-map table_nam
 
 # Resume a cancelled run from its checkpoint
 python app/main.py --analysis table --file a.csv --key SEQ_NO --detail-store run.sqlite --resume
+
+# Analyse only the first 100,000 rows / 200 columns of a huge export
+python app/main.py --analysis table --file huge.csv --max-rows 100000 --max-cols 200
+python app/main.py --analysis table --file huge.csv --max-rows 0   # 0 = no cap
 python app/main.py --folder /data/csv --no-ai --debug
 ```
 
@@ -51,7 +55,16 @@ Options: `--encoding`, `--delimiter`, `--header`, `--batch-size`, `--mode
 (repeatable), `--field-map ROLE=HEADER`, `--max-ai-column-reviews`,
 `--ai-column-reviews (selective|all|none)`, `--max-ai-cell-reviews`,
 `--ai-cell-reviews (selective|all|none)`, `--ai-cell-batch-size`, `--no-cell-report`,
-`--max-field-chars`, `--gui-cell-page-size`.
+`--max-field-chars`, `--gui-cell-page-size`, and the analysis-range / progress controls
+`--max-rows` (0 = unlimited), `--max-cols` (0 = unlimited),
+`--progress (auto|plain|none)`, `--progress-interval <seconds>`.
+
+Progress is printed as one self-refreshing line on an interactive terminal (CMD,
+PowerShell, bash - carriage return only, no ANSI escapes) and as periodic plain log
+lines when stdout is redirected or piped. With `--json` the JSON summary stays on
+stdout and the progress lines go to stderr. Progress never prints cell contents.
+Rows/columns dropped by `--max-rows` / `--max-cols` are counted as *unexamined*, never
+as "clean": they appear in the TXT report, the diagnostics and the GUI progress panel.
 
 ## Features
 

@@ -50,11 +50,20 @@ class FileSettings:
 
 
 class CsvLoader:
-    """Yield normalised rows while tracking parse problems and row counts."""
+    """Yield normalised rows while tracking parse problems and row counts.
 
-    def __init__(self, settings: FileSettings, max_field_chars: int = 10_000_000):
+    `max_cols` caps how many *columns* take part in the analysis. It is a limit,
+    not a width: a file with fewer columns is analysed with all of them, and the
+    fields that fall outside the cap are counted in `columns_excluded` /
+    `fields_excluded` so the report can state clearly that the file was not
+    inspected in full.
+    """
+
+    def __init__(self, settings: FileSettings, max_field_chars: int = 10_000_000,
+                 max_cols: int | None = None):
         self.settings = settings
         self.max_field_chars = max(1, max_field_chars)
+        self.max_cols = max_cols if max_cols and max_cols > 0 else None
         self.parsed_rows = 0
         self.error_rows = 0
         self.empty_rows = 0
@@ -67,6 +76,11 @@ class CsvLoader:
         self.unparsed_rows = 0
         self.column_count = 0
         self.header_length = 0
+        self.source_width = 0
+        self.columns_excluded = 0
+        self.fields_excluded = 0
+        self.rows_excluded = 0
+        self.row_limit_reached = False
         self.column_names: list[str] = []
         self.total_rows: int | None = None
         self.row_errors: list[str] = []
@@ -94,28 +108,46 @@ class CsvLoader:
         if not rows:
             return []
         width = max(len(row) for row in rows)
+        self.source_width = width
         if self.settings.has_header:
             index = self.settings.header_start_row if self.settings.header_start_row < len(rows) else 0
             header = rows[index]
         else:
+            # No header row: the column count comes from the data itself.
             header = [""] * width
         # The declared header width is the reference for "extra" fields: every
-        # row that carries more fields than the header has EXTRA_COL cells.
-        self.header_length = len(header) if self.settings.has_header else width
+        # row that carries more fields than the header has EXTRA_COL cells. The
+        # reference never exceeds max_cols, and a header wider than the cap is
+        # truncated with the dropped columns counted, not silently analysed.
+        if self.settings.has_header:
+            reference = min(len(header), self.max_cols or len(header))
+        else:
+            reference = min(width, self.max_cols or width)
+        self.header_length = max(1, reference)
         names = []
-        for i, name in enumerate(header):
-            name = (name or "").strip()
+        # The cap is a ceiling on the columns that actually exist in the file, never
+        # a number of columns to manufacture.
+        limit = min(max(len(header), width), self.max_cols) if self.max_cols else max(len(header), width)
+        for i in range(limit):
+            name = (header[i] if i < len(header) else "").strip()
             if not name or not name.replace("_", "").isalnum():
                 name = f"COL_{i + 1:03d}"
             names.append(name)
-        for i in range(len(names), width):
-            names.append(f"COL_{i + 1:03d}")
+        self.columns_excluded = max(0, max(len(header), width) - len(names))
         return names
 
     def prepare(self) -> None:
         if not self.column_names:
             self.column_names = self._column_names()
-            self.column_count = len(self.column_names)
+        if not self.source_width:
+            # Names taken straight from the format profile: their length is the
+            # declared width of the file.
+            self.source_width = len(self.column_names)
+        if self.max_cols and len(self.column_names) > self.max_cols:
+            self.columns_excluded = max(self.columns_excluded,
+                                       max(self.source_width, len(self.column_names)) - self.max_cols)
+            self.column_names = self.column_names[: self.max_cols]
+        self.column_count = len(self.column_names)
         if not self.header_length:
             self.header_length = self.column_count
         if self.total_rows is None:
@@ -135,7 +167,7 @@ class CsvLoader:
             return self.settings.header_start_row + 1
         return self.settings.header_start_row
 
-    def iter_rows(self):
+    def iter_rows(self, row_limit: int | None = None):
         """Yield (row_index, row).
 
         Short rows are padded to the header width. Rows with *more* fields than the
@@ -160,7 +192,17 @@ class CsvLoader:
                     if len(self.row_errors) < 50:
                         self.row_errors.append(f"헤더 Row parse error: {exc}")
             index = 0
+            consumed = 0
             while True:
+                if row_limit is not None and consumed >= row_limit:
+                    # The analysis range stops the stream here. The rows after the
+                    # cap are counted as unexamined, never assumed to be clean.
+                    # `consumed` counts every data row the stream reached (blank or
+                    # unparseable rows included), so the cap is a bound on rows
+                    # actually read, not on rows kept for analysis.
+                    self.row_limit_reached = True
+                    self.rows_excluded = max(0, (self.total_rows or 0) - row_limit)
+                    break
                 try:
                     raw = next(reader)
                 except StopIteration:
@@ -168,6 +210,7 @@ class CsvLoader:
                 except csv.Error as exc:
                     # csv.Error is raised by the iterator itself, so it has to be
                     # caught here or the whole file analysis aborts.
+                    consumed += 1  # count_rows counts an unparseable record as a row
                     self.error_rows += 1
                     self.unparsed_rows += 1
                     message = str(exc)
@@ -177,10 +220,23 @@ class CsvLoader:
                         self.row_errors.append(f"행 {index}: {message}")
                     continue
                 if not raw or all(not cell.strip() for cell in raw):
+                    # Truly empty lines are not data rows, so they do not consume
+                    # the `max_rows` budget (they are not counted in total_rows
+                    # either).
                     self.empty_rows += 1
                     continue
+                consumed += 1
                 width = len(raw)
                 reference = self.header_length or self.column_count
+                self.source_width = max(self.source_width, width)
+                cap = self.max_cols or width
+                if width > cap:
+                    # Beyond the configured analysis range: counted and reported,
+                    # never analysed and never silently dropped.
+                    self.fields_excluded += width - cap
+                    self.columns_excluded = max(self.columns_excluded, width - self.column_count)
+                    raw = raw[:cap]
+                    width = cap
                 if width < reference:
                     self.short_rows += 1
                     raw = raw + [""] * (reference - width)
@@ -193,8 +249,16 @@ class CsvLoader:
                 yield index, raw
                 index += 1
 
-    def progress_total(self) -> int:
-        return self.total_rows or (self.parsed_rows + self.error_rows + self.empty_rows)
+    def progress_total(self, row_limit: int | None = None) -> int:
+        """Rows that will actually take part in this run.
+
+        The denominator is the real row count when it is known, bounded by the
+        caller's row cap. It never invents rows that do not exist in the file.
+        """
+        total = self.total_rows or (self.parsed_rows + self.error_rows + self.empty_rows)
+        if row_limit and row_limit > 0:
+            total = min(total, row_limit)
+        return total
 
 
 def file_size(path: str) -> int:

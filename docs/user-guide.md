@@ -86,7 +86,45 @@ Cell evidence는 삭제되지 않는다.
 * Detail 상한(default 5,000 Row)을 초과하면 초과 Row 수가 보고서에 표시되고
   Row/Cell count는 그대로 정확하다. 원본 값은 기록되지 않는다 (always masked).
 
+## 분석 범위 제한 (max_rows / max_cols)
+
+`max_rows`(default 999,999)와 `max_cols`(default 999,999)는 **상한**이지 사전 할당
+크기가 아니다. 파일이 더 작으면 실제 Row/Col까지만 분석하고, 상한을 초과한 Row/Col은
+"미검사"로 집계된다.
+
+* CLI `--max-rows`, `--max-cols` (0 = 무제한), GUI 설정 창 "최대 분석 Row / Col".
+* 헤더 없는 CSV, 헤더보다 긴 Row(EXTRA_COL_n)도 실제 width 기준으로 Col 수를 파악한다.
+* 잘린 Row/Col은 TXT 보고서에 "분석 범위: Row 200 / 파일 Row 500 (미검사 Row 300)"와
+  "경고: ... 이 결과는 전체 파일 전수 검사가 아니다" line로 표시되고, GUI progress pane의
+  `분석 범위` field에도 같은 text가 나온다. diagnostics에는
+  `analysis_range_truncated` event가 recorded된다.
+* Resume: `max_rows`는 그 분석 실행의 **전체** Row 상한이다. Checkpoint에 40 Row가
+  이미 analysed라면 `--max-rows 100` resume 시 추가 100 Row가 아니라 Row 41~100만
+  분석한다. 파일/스키마/max_cols가 checkpoint와 다르면 Resume이 안전하지 않으므로
+  checkpoint를 reset하고 처음부터 다시 분석한다(`resume_scope_mismatch`).
+
+## 진행률 표시 (CLI + GUI)
+
+CLI와 GUI는 같은 `ProgressTracker` events를 사용한다. 9 단계:
+파일 형식/크기 확인 → CSV 스트리밍 + Rule Engine → AI Column Review → AI Cell Review
+→ AI Row Review → Rule/AI 판정 병합 → Human Review 대상 생성 → 결과 Export →
+임시 자원 정리.
+
+한 줄에는 `n/9 단계 | i/N 파일 | Row done/total (%) rows/s | Cell ... | AI 후보/판정
+(batch, reuse, 성공, 실패, 생략) | Human Review 대기 | Export k/m | etime | ETA`가
+나온다.
+
+* Interactive terminal: `\r`로 같은 줄 갱신. ANSI escape를 사용하지 않아 CMD/PowerShell
+  모두에서 동일하게 동작한다. Redirect/pipe then: 주기별 plain newline log lines.
+* `--progress auto|plain|none`, `--progress-interval <초>` (default 0.25).
+* `--json` then: JSON은 stdout, 진행 line은 stderr.
+* 전체 Row 수를 알 수 없then percentage를 만들어 표시하지 않고 "전체 Row 수 미확인"으로
+  표시한다. ETA는 충분히 처리된 after에만 나온다.
+* AI 후보 수와 실제 추론 수는 separate counters이며 progress line에 구분 printed된다.
+* 원문 개인정보는 진행 로그에 절대 출력되지 않는다.
+
 ## GPU (NVIDIA CUDA)
+
 
 `detect_hardware()` probes the GPU with `nvidia-smi` (PowerShell WMI fallback on
 Windows), then checks three gates before claiming GPU inference: the ggml GPU backend

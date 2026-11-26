@@ -22,6 +22,7 @@ from app.export.csv_exporter import write_csv
 from app.export.hit_exporter import (write_cell_records, write_group_records, write_hit_rows,
                                      write_record_records, write_row_records)
 from app.export.txt_exporter import write_txt
+from app.core.progress import stage_label
 from app.ui.analysis_worker import AnalysisWorker
 from app.ui.analysis_window import AnalysisWindow
 from app.ui.file_selector import FileSelector
@@ -243,8 +244,12 @@ class MainWindow(QWidget):
                 "AI 모델": result.ai_summary.get("model") or "없음",
                 "AI 판정 수": str(result.ai_summary.get("decisions", 0)),
                 "AI 생략/오류": result.ai_summary.get("skipped_reason") or result.ai_summary.get("error") or "-",
+                "분석 범위": result.scope.get("text", "-"),
             }
         )
+        scope = getattr(result, "scope", {}) or {}
+        if scope.get("rows_excluded") or scope.get("columns_excluded"):
+            get_logger("gui").warning("분석 범위 제한: %s (전수 검사 아님)", scope.get("text", "-"))
 
     def _analysis_finished(self, results: list) -> None:
         self.run_button.setEnabled(True)
@@ -253,14 +258,22 @@ class MainWindow(QWidget):
         output_dir = Path("results")
         output_dir.mkdir(exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        write_csv([r.as_dict() for result in results for r in result.results],
-                  output_dir / f"privacy_results_{stamp}.csv")
-        write_txt(results, output_dir / f"privacy_report_{stamp}.txt")
-        write_hit_rows(results, output_dir / f"privacy_hits_{stamp}.csv")
-        write_row_records(results, output_dir / f"privacy_rows_{stamp}.csv")
-        write_cell_records(results, output_dir / f"privacy_cells_{stamp}.csv")
-        write_record_records(results, output_dir / f"privacy_records_{stamp}.csv")
-        write_group_records(results, output_dir / f"privacy_groups_{stamp}.csv")
+        exports = [
+            (write_csv, [r.as_dict() for result in results for r in result.results],
+             output_dir / f"privacy_results_{stamp}.csv"),
+            (write_txt, results, output_dir / f"privacy_report_{stamp}.txt"),
+            (write_hit_rows, results, output_dir / f"privacy_hits_{stamp}.csv"),
+            (write_row_records, results, output_dir / f"privacy_rows_{stamp}.csv"),
+            (write_cell_records, results, output_dir / f"privacy_cells_{stamp}.csv"),
+            (write_record_records, results, output_dir / f"privacy_records_{stamp}.csv"),
+            (write_group_records, results, output_dir / f"privacy_groups_{stamp}.csv"),
+        ]
+        for index, (writer, payload, path) in enumerate(exports, start=1):
+            writer(payload, path)
+            self.progress.update_state(**{
+                "현재 단계": stage_label("export"),
+                "Export 진행": f"{index}/{len(exports)}",
+            })
         get_logger("gui").info(f"결과 Export: {stamp} (Cell hit {write_hit_rows.rows_written:,}건, "
                                f"Row {write_row_records.rows_written:,}건, "
                                f"Cell verdict {write_cell_records.rows_written:,}건)")
