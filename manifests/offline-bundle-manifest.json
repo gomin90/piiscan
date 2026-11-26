@@ -1,11 +1,11 @@
 {
   "schema": "piiscan-offline-bundle/1.0",
-  "generated_at": "2026-11-25T06:58:10.572739+00:00",
+  "generated_at": "2026-11-26T01:39:12.614752+00:00",
   "git": {
-    "commit": "6346a70029b974058c600956ad0dac4b0d33f6b9",
+    "commit": "a63201c14733fb07aed3351b71ae15470eb46520",
     "branch": "main",
     "repository": "https://github.com/gomin90/piiscan.git",
-    "generated_at": "2026-11-25T06:58:10.607241+00:00"
+    "generated_at": "2026-11-26T01:39:12.650461+00:00"
   },
   "target": {
     "windows": {
@@ -32,9 +32,9 @@
       "scorer": "jev_score_v2.cpp"
     }
   },
-  "file_count": 272,
-  "total_bytes": 2653780650,
-  "total_mb": 2530.8,
+  "file_count": 275,
+  "total_bytes": 2653844507,
+  "total_mb": 2530.9,
   "files": [
     {
       "path": ".gitattributes",
@@ -56,8 +56,8 @@
     },
     {
       "path": "README.md",
-      "size": 9256,
-      "sha256": "7b6b2c31bd0b5f324c454147a0f338437ee914d8eabc7758fb3d4f26aafe8eff",
+      "size": 10162,
+      "sha256": "af89f735833f4b02419ab18634f7652307d1f65f8ecec0318ec2ecbf757ddd5a",
       "category": "other"
     },
     {
@@ -146,8 +146,8 @@
     },
     {
       "path": "app/config/settings.py",
-      "size": 4762,
-      "sha256": "607aeeda9779d219cbdab9d783e32a24b3d55a93c1f2b859570158fe7eacae38",
+      "size": 5281,
+      "sha256": "201813de075e1f5477ed77e5b05d6f5a899673edf00c53c2c216a814b5db2f5f",
       "category": "app"
     },
     {
@@ -158,8 +158,8 @@
     },
     {
       "path": "app/core/analysis_service.py",
-      "size": 33434,
-      "sha256": "b81e4139d1a065eaa88eec0a816fe5abeb8937d0bcea6bc3a33479e8f88dfb82",
+      "size": 40156,
+      "sha256": "2eab6f43e7327424ffdfcd7f4120564586b1103cbe5da6a3def4dbf616a51e3a",
       "category": "app"
     },
     {
@@ -182,20 +182,20 @@
     },
     {
       "path": "app/core/csv_detector.py",
-      "size": 9001,
-      "sha256": "3aedb117d385ddaadc1afe549c5144a1f08765ed20570fc6e4ce1ca0ab964b39",
+      "size": 9225,
+      "sha256": "1488273d54c9e7418ffbb6d65448e638b98d9b6002f96b6cc83229a88c350876",
       "category": "app"
     },
     {
       "path": "app/core/csv_loader.py",
-      "size": 8182,
-      "sha256": "34f533ec3e37423245b0f31cd1dabef72290b4fc40621e282c7aa143b4fbe154",
+      "size": 11835,
+      "sha256": "f444700bbbccc0119c62aceed51b6da9c857bf73c84cecc1e62af2af8b8b08fa",
       "category": "app"
     },
     {
       "path": "app/core/detail_store.py",
-      "size": 61704,
-      "sha256": "11ce51433e2b4e4244258f2e7cdf0d69648f9fe9f1155d1af5f85fec2da9c358",
+      "size": 64219,
+      "sha256": "9867cd8bc0c82c3bec2fd5d493ccc9fdfe5ff559798f1f254025cfe810abedac",
       "category": "app"
     },
     {
@@ -208,6 +208,12 @@
       "path": "app/core/privacy_engine.py",
       "size": 27311,
       "sha256": "c6c24c1a518e1a9d867891cb43afc90d84543aaaa6de6fe4cf8dbc05334cb666",
+      "category": "app"
+    },
+    {
+      "path": "app/core/progress.py",
+      "size": 16475,
+      "sha256": "d1a848fb7a296f991986246ff51a43bb2fca205599510e4f79d4d1623a4d0671",
       "category": "app"
     },
     {
@@ -392,14 +398,14 @@
     },
     {
       "path": "app/export/txt_exporter.py",
-      "size": 7379,
-      "sha256": "f3fcd3bb3e9abac1d2855f301668c94d16121a3f70c86384cee738147e4b5625",
+      "size": 8499,
+      "sha256": "cefd4cc7dfb0ed3ced4908515dc7b97cf1dae442bf23e3a9b8d2c3ed6f0a1ffa",
       "category": "app"
     },
     {
       "path": "app/main.py",
-      "size": 18379,
-      "sha256": "5be74b2ed985c2815f2131bf76e89239b4f12d998001cba42ef2bb6299e395c0",
+      "size": 22745,
+      "sha256": "a24eff9eee27feb9c7cb3591bb0030d571724fa11fa239f9dba5e4787e1020d5",
       "category": "app"
     },
     {
@@ -422,14 +428,14 @@
     },
     {
       "path": "app/metadata_analysis/metadata_service.py",
-      "size": 14565,
-      "sha256": "13888fa1347c83cfa1ad826ef923cfdd3fb6cacb944b679794fe0324a9c9fada",
+      "size": 17567,
+      "sha256": "a0b4f2d8141300360f43557eb4cbe3a0fcbee25049be2c692b59d3ef13b64088",
       "category": "app"
     },
     {
       "path": "app/metadata_analysis/reports.py",
-      "size": 4763,
-      "sha256": "a4d4917bbaf2e3afbe50fbce15454fb38ebabd25c3dc3d34e2b6b2e35c8dbe38",
+      "size": 5144,
+      "sha256": "2576169f8c5cfe2e7dfe0e737c21dfb09945ca8f1e6f9d55806c9cb0baaff813",
       "category": "app"
     },
     {
@@ -440,14 +446,14 @@
     },
     {
       "path": "app/ui/analysis_window.py",
-      "size": 2257,
-      "sha256": "3b229b00b1916ef3b92eb512aed08a50ecf23754ef3c1586743ca4b511042eb5",
+      "size": 2676,
+      "sha256": "7dbf1f9ddb0a8115712f6f1fcb25bc6339c4a6136d44f9d43f72479eec53e978",
       "category": "app"
     },
     {
       "path": "app/ui/analysis_worker.py",
-      "size": 5809,
-      "sha256": "75e8979d31a258a2dbc6d068bbb16b223b01baeb11787e39a8c57e93e08a550a",
+      "size": 5691,
+      "sha256": "0c048d14f118965d8eca85d55829edc65239b6d4e1b7fa7afe89742e80abdc54",
       "category": "app"
     },
     {
@@ -470,8 +476,8 @@
     },
     {
       "path": "app/ui/main_window.py",
-      "size": 15836,
-      "sha256": "4004314d5ef313080ff7eb8807e4c9a261263cd6e43a7184a90d1e734ab36c8c",
+      "size": 16535,
+      "sha256": "34d7ef1bdd2c110f6858ffa424b41111a46912a30efa0900af69ef3a8a56e921",
       "category": "app"
     },
     {
@@ -494,8 +500,8 @@
     },
     {
       "path": "app/ui/settings_window.py",
-      "size": 6717,
-      "sha256": "7a533f98f597894e2b343b2b87f1570ce58742d0038f8ada17c55d77da3a79df",
+      "size": 7333,
+      "sha256": "a1c810dc03db124eb7966b1fe9fd218adca22fc5fa53d07b6e74d80e3dd542e0",
       "category": "app"
     },
     {
@@ -590,8 +596,8 @@
     },
     {
       "path": "docs/user-guide.md",
-      "size": 6544,
-      "sha256": "2cd7b89d1b87c8bf5378f627ca97557c4bc7754f74718becb43fa66325fa744c",
+      "size": 8975,
+      "sha256": "e28700abcd4645f9890b5367045211552849ecff7541632a67fb2a57d892de0f",
       "category": "docs"
     },
     {
@@ -1105,6 +1111,12 @@
       "category": "other"
     },
     {
+      "path": "tests/qa/test_analysis_range.py",
+      "size": 14380,
+      "sha256": "9b9b142e2205f5d46ed65d1e65643d4d1f2834768092d25fd4f40478c1b27e30",
+      "category": "other"
+    },
+    {
       "path": "tests/qa/test_detector_context.py",
       "size": 6356,
       "sha256": "f1f6de3ca92b22d770b974e1fb370844d77526f8d6fde983e16dfbdb3e499f6f",
@@ -1162,6 +1174,12 @@
       "path": "tests/qa/test_offline_bundle.py",
       "size": 6210,
       "sha256": "1fa15c0ba628e24ef7fb343a4c0905a50dab67932bfb5723268818b2985cba06",
+      "category": "other"
+    },
+    {
+      "path": "tests/qa/test_progress_reporting.py",
+      "size": 5547,
+      "sha256": "a9e43c47bdd7ca4fa3a6e65ed48db4d23fa91874524e7e450b7226222e023b96",
       "category": "other"
     },
     {
